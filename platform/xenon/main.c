@@ -18,6 +18,7 @@
 #include "music.h"
 #include "text.h"
 #include "console_batch.h"
+#include "ui_clock.h"
 
 static const char *sections[] = {
     "Graphics / controller", "Network / DHCP diagnostics", "Audio output",
@@ -58,7 +59,7 @@ static void safe_print(const char *text, size_t max) {
     for (i = 0; i < max && text[i]; ++i) {
         unsigned char c = (unsigned char)text[i];
         /* Never interpret server-controlled terminal escapes/control bytes. */
-        console_putch(c >= 32 && c < 127 ? c : '.');
+        xf_console_putch(c >= 32 && c < 127 ? c : '.');
     }
 }
 static void begin_edit(int field) {
@@ -176,7 +177,7 @@ static void draw_browser(void) {
         detail_line("Series: ", it->series); detail_line("Artist: ", it->artist); detail_line("Album: ", it->album);
         detail_line("Rating: ", it->rating); detail_line("Genres: ", it->genres);
         printf("  Overview (Up/Down scrolls):\n");
-        remaining = console_get_cursor_max_y() - console_get_cursor_y() - 5;
+        remaining = console_get_cursor_max_y() - xf_console_cursor_y() - 5;
         rows = remaining > 0 ? (unsigned)remaining : 1; if (rows > 8) rows = 8;
         if (count <= rows) browser.detail_scroll = 0;
         else if (browser.detail_scroll > count - rows) browser.detail_scroll = count - rows;
@@ -224,7 +225,7 @@ static void draw_player(void) {
 static void draw_keyboard(void) {
     size_t i;
     printf("\n  %s\n\n  ", edit_field == 1 ? "Server IPv4[:port] (default 8096)" : edit_field == 2 ? "Jellyfin username" : "Jellyfin password (masked)");
-    if (keyboard.secret) for (i = 0; keyboard.value[i]; ++i) console_putch('*');
+    if (keyboard.secret) for (i = 0; keyboard.value[i]; ++i) xf_console_putch('*');
     else safe_print(keyboard.value, XF_TEXT_LIMIT);
     printf("_\n\n");
     for (i = 0; i < xf_keyboard_count(&keyboard); ++i) {
@@ -260,7 +261,7 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.4 - XeLL / MP3 music streaming\n");
+    printf("\n  XENONFIN 0.4.1 - XeLL / MP3 music streaming\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < 8; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
@@ -306,12 +307,14 @@ int main(void) {
     struct controller_data_s pad, previous;
     int selected = 0, redraw = 1;
     char held = 0;
-    uint32_t repeat_at = 0, last_draw = 0;
+    uint32_t repeat_at = 0;
+    xf_ui_clock ui_clock = {0, 0};
     xf_audio_backend audio = { audio_queued, audio_free, audio_submit, NULL };
     memset(&previous, 0, sizeof(previous)); xf_http_init(&http); xf_browser_init(&browser);
     xf_music_init(&music, &audio);
     /* Preserve the hardware-tested initialization order. */
     xenos_init(VIDEO_MODE_AUTO); console_init(); usb_init(); xenon_sound_init();
+    if (!xf_console_init()) { printf("Unsupported framebuffer geometry; text compositor not started.\n"); return 1; }
     for (;;) {
         uint32_t now = xf_monotonic_ms(); char direction = 0, move = 0;
         xf_network_tick(now); xf_http_tick(&http, now, xf_network_ready());
@@ -359,7 +362,7 @@ int main(void) {
                 }
                 else if (selected == 5) selected = 4;
                 else if (selected == 7) selected = 6;
-                else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); return 0; }
+                else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); xf_console_shutdown(); return 0; }
                 redraw = 1;
             }
             if (pad.y && !previous.y && selected == 4) { begin_edit(1); redraw = 1; }
@@ -396,9 +399,14 @@ int main(void) {
                 redraw = 1;
             }
         }
-        /* Rate-limited diagnostics, not a continuously clearing/flickering console. */
-        if ((uint32_t)(now - last_draw) >= 500 && (selected == 1 || selected == 7 || http.active)) redraw = 1;
-        if (redraw) { draw(selected); xf_music_tick(&music, xf_monotonic_ms(), xf_network_ready()); last_draw = now; redraw = 0; }
+        /* Presentation only polls a fence: no retrace wait, decoding or HTTP here.
+         * Dirty controller/data events persist while a flip is pending. Only
+         * visible statistics get timer updates, at most four per second. */
+        xf_console_poll(now);
+        if (xf_console_ready() && xf_ui_due(&ui_clock, now, redraw,
+                !editing && (selected == 1 || selected == 7 || http.active))) {
+            draw(selected); xf_ui_rendered(&ui_clock, now); redraw = 0;
+        }
         previous = pad; udelay(10000);
     }
 }

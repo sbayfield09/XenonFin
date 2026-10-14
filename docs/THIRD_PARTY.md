@@ -1,6 +1,6 @@
 # Dependencies and provenance
 
-Original XenonFin source is GPL-2.0-or-later; see LICENSE. The native 0.4 minimp3 decoder and its license are vendored under `platform/xenon/third_party/minimp3`; other external dependencies are not copied into the source tree. Scripts fetch pinned, verified binary snapshots or use distribution packages. Preserve applicable notices and source availability when distributing linked artifacts.
+Original XenonFin source is GPL-2.0-or-later; see LICENSE. The native 0.4 minimp3 decoder and its license are vendored under `platform/xenon/third_party/minimp3`; the tiled-console attribution is retained in `framebuffer.c` and [LIBXENON_CONSOLE_LICENSE.md](LIBXENON_CONSOLE_LICENSE.md); other external dependencies are not copied into the source tree. Scripts fetch pinned, verified binary snapshots or use distribution packages. Preserve applicable notices and source availability when distributing linked artifacts.
 
 | Component | Source | Use / license |
 |---|---|---|
@@ -20,3 +20,5 @@ Vendored minimp3 SHA-256: `minimp3.h` **57e437c5c1f0e8b243885d3929c8973b5e6c7784
 The official test-server image is pinned to amd64 manifest `sha256:3b38dae4c3ddd6ebc7378538fba4d3f314070ebefbdb3d688166b7c8658fb123` (10.10.7). Its server and web layers are checksum-verified. The Free60 toolchain manifest is recorded in PLATFORM.md and the downloader. OCI digests provide exact downloaded content identification; they do not imply an independent compiler bootstrap audit.
 
 Jellyfin API source inspected separately at commit `aec42b345e1a7da25ee5492183f12209338df688`; actual integration testing used 10.10.7. Microsoft SDK/XDK code, headers, binaries and codec libraries are not included or needed for the implemented builds. Synthetic test media is generated locally. `scripts/package.sh` includes original application source alongside binaries but does not bundle distribution libraries, the toolchain or fonts; anyone distributing those components must satisfy their own applicable licensing/source obligations.
+
+The 0.4.1 console adapter reuses the linked libXenon GPL 8x16 Linux font and adapts the BSD console tiled-address calculation. The exact console notice and font attribution accompany all updated binary/source archives in LIBXENON_CONSOLE_LICENSE.md. Source: the pinned Free60 libXenon commit linked in PLATFORM.md, `libxenon/drivers/console/{console.c,font_8x16.h}`.

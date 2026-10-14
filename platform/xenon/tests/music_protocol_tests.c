@@ -1,18 +1,13 @@
 #include "../music_api.h"
 #include "../audio_decode.h"
 #include "../text.h"
-#include "../console_batch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static unsigned checks, flushes;
+static unsigned checks;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr,"music protocol line %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 static xf_response response;
 static xf_audio_decoder decoder;
-static unsigned char framebuffer[32], dma[16];
-void __wrap_memdcbst(void *, int);
-void __real_memdcbst(void *p, int size) { (void)p; (void)size; ++flushes; }
-void console_clrscr(void) { __wrap_memdcbst(framebuffer, sizeof(framebuffer)); }
 static int receive_byte(void *context, unsigned char c) { ++*(unsigned *)context; return c == 'a'; }
 int main(void) {
     char body[1500], text[100], request[XF_REQUEST_LIMIT], error[128];
@@ -56,9 +51,5 @@ int main(void) {
     CHECK(xf_text_line("one two three four",&at,9,text,sizeof(text))&&!strcmp(text,"three"));
     CHECK(xf_text_line("one two three four",&at,9,text,sizeof(text))&&!strcmp(text,"four"));
     CHECK(xf_text_lines("abcdefghijk",4)==3);
-    __wrap_memdcbst(framebuffer,sizeof(framebuffer)); CHECK(flushes==1);
-    xf_console_begin(); for(i=0;i<100;++i)__wrap_memdcbst(framebuffer,sizeof(framebuffer)); CHECK(flushes==1);
-    __wrap_memdcbst(dma,sizeof(dma)); CHECK(flushes==2); xf_console_end(); CHECK(flushes==3);
-    __wrap_memdcbst(framebuffer,sizeof(framebuffer)); CHECK(flushes==4);
-    printf("Native music API/stream framing/decoder bounds/layout/cache batching: %u assertions passed\n",checks);return 0;
+    printf("Native music API/stream framing/decoder bounds/layout: %u assertions passed\n",checks);return 0;
 }

@@ -1,24 +1,36 @@
-/* The pinned console flushes its ENTIRE framebuffer after EVERY character.
- * Batch that exact buffer's cache stores for one draw. NIC/audio buffers always
- * pass through. No renderer, framebuffer layout or graphics init is replaced. */
+/* Capture existing printf-based pages into a complete character frame. Never
+ * redirect libXenon's private console_fb or suppress audio/NIC cache stores. */
 #include "console_batch.h"
-#include <stddef.h>
-extern void console_clrscr(void);
-extern void __real_memdcbst(void *, int);
-static void *framebuffer;
-static int framebuffer_size, capture, batching, dirty;
-void __wrap_memdcbst(void *address, int size) {
-    if (capture) { framebuffer = address; framebuffer_size = size; capture = 0; }
-    if (batching && address == framebuffer && size == framebuffer_size) { dirty = 1; return; }
-    __real_memdcbst(address, size);
+#include "framebuffer.h"
+#include <console/console.h>
+#include <stdio.h>
+extern void (*stdout_hook)(const char *, int);
+extern uint32_t xf_monotonic_ms(void);
+static void (*boot_hook)(const char *, int);
+static xf_console_frame frame;
+static void capture(const char *text, int size) {
+    while (size-- > 0) xf_console_putch((unsigned char)*text++);
 }
+int xf_console_init(void) {
+    xf_console_backend backend;
+    unsigned columns, rows, old_columns, old_rows;
+    if (!xf_framebuffer_init(&backend, &columns, &rows)) return 0;
+    console_get_dimensions(&old_columns, &old_rows);
+    if (columns != old_columns || rows != old_rows || !xf_console_frame_init(&frame, columns, rows, &backend)) return 0;
+    /* printf fragments and direct glyph calls must retain their order. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+    boot_hook = stdout_hook; return 1;
+}
+int xf_console_ready(void) { return xf_console_frame_ready(&frame); }
+void xf_console_poll(uint32_t now) { xf_console_frame_poll(&frame, now); }
 void xf_console_begin(void) {
-    batching = capture = 1; dirty = 0;
-    console_clrscr(); /* Its first/only flush binds the actual console buffer. */
-    capture = 0;
+    fflush(stdout);
+    if (xf_console_frame_begin(&frame, console_color[0], console_color[1])) stdout_hook = capture;
 }
+void xf_console_putch(unsigned char c) { xf_console_frame_putch(&frame, c, console_color[0], console_color[1]); }
+int xf_console_cursor_y(void) { return (int)frame.y; }
 void xf_console_end(void) {
-    batching = 0;
-    if (dirty) __real_memdcbst(framebuffer, framebuffer_size);
-    dirty = 0;
+    fflush(stdout); stdout_hook = boot_hook;
+    xf_console_frame_end(&frame, xf_monotonic_ms());
 }
+void xf_console_shutdown(void) { stdout_hook = boot_hook; xf_framebuffer_shutdown(); }

@@ -11,3 +11,4 @@ __pycache__/
 !/dist/xenonfin-xell-http.elf
 !/dist/xenonfin-xell-browse.elf
 !/dist/xenonfin-xell-music.elf
+!/dist/xenonfin-xell-music-fix.elf

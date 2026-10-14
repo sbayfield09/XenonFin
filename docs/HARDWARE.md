@@ -1,6 +1,6 @@
 # Xbox 360 acceptance checklist
 
-**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **actual decoded music has not yet been heard on Xbox by this development session**. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
+**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. 0.4.1 fixes text-only flicker; its complete-frame presentation needs [console regression testing](NATIVE_RENDERING.md). See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
 
 | Check | Expected behavior | Status |
 |---|---|---|
@@ -16,7 +16,7 @@
 | Artists / albums / tracks | Real hierarchy, metadata and bounded neighbor fetching | Native 0.4 host-tested; console acceptance pending |
 | Search / cancel / empty result | Real grouped server results, UI remains responsive | Unrun |
 | Artwork / malformed image / cache churn | Correct resized images, stable memory | Unrun |
-| MP3 / mono / stereo / rate conversion | Native MP3 → 48 kHz stereo S16LE; optional server MP3 transcode | Actual compressed decode and real Jellyfin host tests pass; audible Xbox output pending |
+| MP3 / mono / stereo / rate conversion | Native MP3 → 48 kHz stereo S16LE; optional server MP3 transcode | Actual compressed decode and real Jellyfin host tests pass; audible MP3 output confirmed by user in 0.4; broader format matrix pending |
 | Music pause / resume / stop / skip / natural advance | Responsive UI and accurate queued-PCM progress | Native 0.4 host-tested; console pending; shuffle/repeat absent |
 | 480p H.264/AAC local then streamed | Sustained measured decode and A/V synchronization | Unrun |
 | 720p30 Baseline / Main | Sustained measured throughput at 3–5 Mbps | Unrun |
