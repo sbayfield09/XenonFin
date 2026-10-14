@@ -87,14 +87,10 @@ void xf_http_cancel(xf_http_client *c) {
     error(c, 0, "Request cancelled"); detach(c, 0);
     if (c->sensitive) xf_wipe(c->response.body, sizeof(c->response.body));
 }
-int xf_http_begin(xf_http_client *c, const xf_endpoint *ep, const char *device,
-                  const char *user, const char *password, uint32_t now) {
+static int begin_transport(xf_http_client *c, const xf_endpoint *ep, int count, uint32_t now) {
     ip_addr_t address;
-    int count;
     err_t rc;
-    xf_http_cancel(c); xf_http_init(c); c->sensitive = user != NULL;
-    count = xf_request(c->request, sizeof(c->request), ep, device, user, password);
-    if (count < 0) { error(c, 0, "Invalid credentials or oversized request"); return 0; }
+    if (count < 0) { error(c, 0, "Invalid or oversized HTTP request"); return 0; }
     c->request_size = (size_t)count; c->began = c->progress = now;
     c->pcb = tcp_new();
     if (!c->pcb) { error(c, ERR_MEM, "No free TCP connection"); xf_wipe(c->request, sizeof(c->request)); return 0; }
@@ -104,6 +100,20 @@ int xf_http_begin(xf_http_client *c, const xf_endpoint *ep, const char *device,
     rc = tcp_connect(c->pcb, &address, ep->port, connected);
     if (rc != ERR_OK) { error(c, rc, tcp_error(rc)); detach(c, 0); return 0; }
     return 1;
+}
+int xf_http_begin(xf_http_client *c, const xf_endpoint *ep, const char *device,
+                  const char *user, const char *password, uint32_t now) {
+    int count;
+    xf_http_cancel(c); xf_http_init(c); c->sensitive = user != NULL;
+    count = xf_request(c->request, sizeof(c->request), ep, device, user, password);
+    return begin_transport(c, ep, count, now);
+}
+int xf_http_get(xf_http_client *c, const xf_endpoint *ep, const char *device,
+                const char *token, const char *resource, uint32_t now) {
+    int count;
+    xf_http_cancel(c); xf_http_init(c); c->sensitive = 1;
+    count = xf_get_request(c->request, sizeof(c->request), ep, device, token, resource);
+    return begin_transport(c, ep, count, now);
 }
 void xf_http_tick(xf_http_client *c, uint32_t now, int ready) {
     if (!c->active) return;

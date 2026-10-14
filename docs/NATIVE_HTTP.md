@@ -1,5 +1,7 @@
 # XeLL native HTTP/authentication build 0.2
 
+**Historical 0.2 implementation notes:** the user has now confirmed this version's graphics/controller/audio/Ethernet, real Jellyfin HTTP communication, successful username/password authentication, HTTP 200 and token in RAM on Xbox 360. The earlier pending-test statements below describe the initial development stage. Current version 0.3 adds browsing; use [NATIVE_BROWSING.md](NATIVE_BROWSING.md) for the latest download and hardware checklist. The direct `xenonfin-xell-http.elf` remains the unchanged 0.2 rollback artifact; the diagnostic archive now packages 0.3.
+
 This extends the existing hardware-tested libXenon ELF. The renderer/console, USB controller polling, audio tone, Ethernet driver and original four diagnostic pages remain. It adds two pages, a controller keyboard and native HTTP. No desktop UI replacement or video-decoder work is included in this stage.
 
 The user has confirmed **the earlier baseline ELF** boots through XeLL, renders graphics, accepts controller navigation, plays audio and initializes Ethernet with link up and IP `192.168.68.112`. That is valuable hardware evidence. It does **not** prove that the earlier address was DHCP-assigned, or that this updated build has passed its new hardware tests.

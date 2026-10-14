@@ -43,4 +43,6 @@ int main(void){char err[128];size_t i;CHECK(xf_endpoint_parse("192.168.68.202:80
  xf_http_cancel(&c);window=8192;
  close_oom=1;start(0,0);establish();data("HTTP/1.1 204 No Content\r\n\r\n");xf_http_tick(&c,1,1);CHECK(!c.active&&!c.pcb);close_oom=0;
  connect_error=ERR_RTE;xf_http_init(&c);CHECK(!xf_http_begin(&c,&ep,"device",NULL,NULL,0)&&c.done&&!c.active&&c.error_code==ERR_RTE);connect_error=0;
+ xf_http_init(&c);CHECK(xf_http_get(&c,&ep,"device","browse-token","/Items?Limit=10",0));CHECK(c.sensitive&&strstr(c.request,"Token=\"browse-token\""));establish();data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");xf_http_tick(&c,1,1);CHECK(c.done&&!c.active&&!c.request[0]);
+ CHECK(xf_http_get(&c,&ep,"device","browse-token","/Items",0));establish();data("HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\npartial");xf_http_cancel(&c);CHECK(!c.request[0]&&!c.response.body[0]&&!c.active);
  CHECK(writes>0);printf("Native raw TCP callbacks/timeouts/cancellation/cleanup: %u checks passed\n",checks);return 0;}

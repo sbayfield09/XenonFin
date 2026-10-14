@@ -16,6 +16,8 @@ void xf_http_init(xf_http_client *);
 int xf_http_begin(xf_http_client *, const xf_endpoint *, const char *device,
                   const char *user, const char *password, uint32_t now);
 void xf_http_tick(xf_http_client *, uint32_t now, int network_ready);
+int xf_http_get(xf_http_client *, const xf_endpoint *, const char *device,
+                const char *token, const char *resource, uint32_t now);
 void xf_http_cancel(xf_http_client *);
 
 int xf_network_start(uint32_t now);

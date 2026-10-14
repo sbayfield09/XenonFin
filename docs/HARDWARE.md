@@ -1,6 +1,6 @@
 # Xbox 360 acceptance checklist
 
-**User-reported baseline results:** XeLL launch, rendering, controller navigation, audio output, Ethernet initialization and link/IP display (`192.168.68.112`) work on a real console. Exact model/modes were not supplied. DHCP ACK/lease verification and the new HTTP/authentication build are still untested on that console; see [NATIVE_HTTP.md](NATIVE_HTTP.md). Record model, video cable/mode, XeLL version, exact source revision, toolchain digest, server version, wired route and sample checksum with each result.
+**User-reported version 0.2 results:** XeLL launch, graphics, controller navigation, audio, Ethernet, Jellyfin HTTP communication, username/password login, HTTP 200 and a token in RAM work on a real console. Exact model/modes were not supplied. Version 0.3 adds authenticated library browsing and still needs console acceptance; see [NATIVE_BROWSING.md](NATIVE_BROWSING.md). Record model, video cable/mode, XeLL version, exact source revision, toolchain digest, server version and wired route with each result. The later playback rows below are future targets, not features of 0.3.
 
 | Check | Expected behavior | Status |
 |---|---|---|
@@ -9,11 +9,11 @@
 | Controller, sticks, hold repeat, hotplug | Correct focus and controls without keyboard | Baseline navigation confirmed; new keyboard/repeat/hotplug unrun |
 | Ethernet DHCP, link loss, reconnect | Bounded timeout and recoverable connection | Baseline init/link/IP confirmed; actual DHCP ACK and new timeout/retry unrun |
 | Stereo 48 kHz little-endian PCM | Clean audio on HDMI/analog routes used | Baseline audio confirmed by user; route matrix unrun |
-| Initial server / hostname / base path | Saved valid URL and server information | Unrun |
-| Username/password / invalid credentials | Masked entry, safe errors, no secrets in logs | Unrun |
+| Initial server / hostname / base path | RAM-only numeric IPv4 HTTP in native 0.3; hostname/base path remain unsupported | Native HTTP communication confirmed in 0.2 |
+| Username/password / invalid credentials | Masked entry, safe errors, no secrets in logs | Successful native login/token confirmed in 0.2; failure matrix unrun |
 | Valid token restart / expiry / logout | Session reuse and reauthentication | Unrun |
-| Movies / shows / seasons / episodes | Correct hierarchy, metadata, paging and sorting | Unrun |
-| Artists / albums / tracks | Correct hierarchy and complete bounded queues | Unrun |
+| Movies / shows / seasons / episodes | Real hierarchy, metadata and 10-item pages | Native 0.3 implemented; console unrun |
+| Artists / albums / tracks | Real hierarchy and alternate music views; no playback queue yet | Native 0.3 implemented; console unrun |
 | Search / cancel / empty result | Real grouped server results, UI remains responsive | Unrun |
 | Artwork / malformed image / cache churn | Correct resized images, stable memory | Unrun |
 | MP3 / AAC / FLAC conversion | Real synchronized audio output | Unrun |

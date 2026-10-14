@@ -9,3 +9,4 @@ __pycache__/
 .env
 *.log
 !/dist/xenonfin-xell-http.elf
+!/dist/xenonfin-xell-browse.elf

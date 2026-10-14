@@ -19,9 +19,18 @@ int xf_endpoint_parse(const char *, xf_endpoint *, char *error, size_t);
 void xf_wipe(void *, size_t);
 /* 1: found string, 0: absent, -1: invalid JSON/type/overflow. Validates entire document. */
 int xf_json_string(const char *, size_t, const char *path, char *, size_t);
+typedef struct { const char *data; size_t size; } xf_json_ref;
+/* Validated, borrowed spans. No allocation; refs expire with their input. */
+int xf_json_get(xf_json_ref, const char *path, xf_json_ref *);
+int xf_json_elements(xf_json_ref, size_t start, xf_json_ref *, size_t cap, size_t *count);
+int xf_json_text(xf_json_ref, char *, size_t); /* Truncates at a UTF-8 boundary. */
+int xf_json_uint(xf_json_ref, uint64_t *);
+int xf_json_bool(xf_json_ref, int *);
 int xf_json_quote(const char *, char *, size_t);
 int xf_request(char *, size_t, const xf_endpoint *, const char *device_id,
                const char *username, const char *password);
+int xf_get_request(char *, size_t, const xf_endpoint *, const char *device_id,
+                   const char *token, const char *resource);
 
 typedef struct {
     char header[XF_HEADER_LIMIT + 1];

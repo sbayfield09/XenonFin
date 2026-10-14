@@ -90,7 +90,7 @@ int xf_request(char *out, size_t cap, const xf_endpoint *ep, const char *device,
     }
     length = snprintf(out, cap,
         "%s %s HTTP/1.1\r\nHost: %s:%u\r\n"
-        "Authorization: MediaBrowser Client=\"XenonFin\", Device=\"Xbox360 XeLL\", DeviceId=\"%s\", Version=\"0.2.0\"\r\n"
+        "Authorization: MediaBrowser Client=\"XenonFin\", Device=\"Xbox360 XeLL\", DeviceId=\"%s\", Version=\"0.3.0\"\r\n"
         "Accept: application/json\r\nAccept-Encoding: identity\r\nConnection: close\r\n%s",
         login ? "POST" : "GET", login ? "/Users/AuthenticateByName" : "/System/Info/Public", ep->host, ep->port,
         device, login ? "Content-Type: application/json\r\n" : "\r\n");
@@ -104,6 +104,28 @@ done:
     xf_wipe(user, sizeof(user)); xf_wipe(pass, sizeof(pass)); xf_wipe(body, sizeof(body));
     if (length < 0) xf_wipe(out, cap);
     return length;
+}
+int xf_get_request(char *out, size_t cap, const xf_endpoint *ep, const char *device,
+                   const char *token, const char *resource) {
+    size_t i; int n;
+    xf_wipe(out, cap);
+    if (!device || !*device || strlen(device) > 64 || !token || !*token || strlen(token) > 2048 ||
+        !resource || resource[0] != '/' || resource[1] == '/' || strlen(resource) > 1500) return -1;
+    for (i = 0; device[i]; ++i) if (!isalnum((unsigned char)device[i]) && device[i] != '-') return -1;
+    for (i = 0; token[i]; ++i) {
+        unsigned char c = (unsigned char)token[i];
+        if (c < 33 || c > 126 || c == '"' || c == '\\') return -1;
+    }
+    for (i = 0; resource[i]; ++i) {
+        unsigned char c = (unsigned char)resource[i];
+        if (c < 33 || c > 126 || c == '#' || c == '\\') return -1;
+    }
+    n = snprintf(out, cap, "GET %s HTTP/1.1\r\nHost: %s:%u\r\n"
+        "Authorization: MediaBrowser Client=\"XenonFin\", Device=\"Xbox360 XeLL\", DeviceId=\"%s\", Version=\"0.3.0\", Token=\"%s\"\r\n"
+        "Accept: application/json\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+        resource, ep->host, ep->port, device, token);
+    if (n < 0 || (size_t)n >= cap) { xf_wipe(out, cap); return -1; }
+    return n;
 }
 int xf_lease_valid(int managed, int state, int up, uint32_t address, uint32_t offered, uint32_t lease) {
     /* lwIP 1.4.1: BOUND=10, RENEWING=5, REBINDING=4. Those latter two retain an ACKed lease. */
