@@ -93,6 +93,8 @@ For a console that already has working XeLL, copy `build/xenon/xenonfin-boot.elf
 
 ## Packaging and project layout
 
+Download the checked-in archives and checksums from [dist/](dist/). The Xbox archive contains only the XeLL boot diagnostic, not a finished console client or XEX.
+
 `bash scripts/package.sh` creates separate source, Linux desktop and Xbox **boot-diagnostic** archives under `dist/`, with checksums. Desktop runtime dependencies remain system packages. The source archive includes the original source, build scripts, documentation and tests, not account data, dependencies or credentials. There is no XEX conversion step.
 
 `main` handles CLI/lifecycle; `ui` and `keyboard` handle screen navigation; `graphics` and `input` implement SDL/FreeType/controller support; `network` provides bounded verified HTTP; `jellyfin` contains authentication, library parsing, device profiles, negotiation and session reporting; `settings` owns persistence; `images` owns asynchronous artwork; `playback` owns demux, buffering, decoding and stereo audio output. `Reporter` sends ordered session events on a worker. Console-specific startup is isolated in `platform/xenon`. There is no logging of request bodies, authorization headers or media URLs; libav's URL-bearing diagnostics are suppressed in the player.

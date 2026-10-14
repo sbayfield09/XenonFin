@@ -1,5 +1,7 @@
 build/
-dist/
+/dist/*
+!/dist/*.tar.gz
+!/dist/SHA256SUMS
 *.elf
 *.elf32
 *.map
