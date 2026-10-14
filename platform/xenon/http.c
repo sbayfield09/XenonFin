@@ -9,7 +9,7 @@ static int equal(const char *a, const char *b) {
     while (*a && *b) if (tolower((unsigned char)*a++) != tolower((unsigned char)*b++)) return 0;
     return !*a && !*b;
 }
-static int number(const char *s, size_t *out, unsigned base) {
+static int number(const char *s, size_t *out, unsigned base, size_t limit) {
     size_t result = 0;
     int digits = 0;
     for (; *s; ++s) {
@@ -18,7 +18,7 @@ static int number(const char *s, size_t *out, unsigned base) {
         else if (base == 16 && *s >= 'a' && *s <= 'f') digit = (unsigned)(*s - 'a' + 10);
         else if (base == 16 && *s >= 'A' && *s <= 'F') digit = (unsigned)(*s - 'A' + 10);
         else return 0;
-        if (digit >= base || result > (XF_BODY_LIMIT - digit) / base) return 0;
+        if (digit >= base || digit > limit || result > (limit - digit) / base) return 0;
         result = result * base + digit; digits = 1;
     }
     *out = result; return digits;
@@ -46,13 +46,16 @@ static void headers(xf_response *r) {
         while (tail > value && (tail[-1] == ' ' || tail[-1] == '\t')) --tail;
         *tail = 0;
         if (equal(line, "Content-Length")) {
-            if (r->has_length || !number(value, &r->remaining, 10)) { fail(r, "Invalid/oversized Content-Length"); return; }
+            if (r->has_length || !number(value, &r->remaining, 10, r->body_limit)) { fail(r, "Invalid/oversized Content-Length"); return; }
             r->has_length = 1;
         } else if (equal(line, "Transfer-Encoding")) {
             if (r->chunked || !equal(value, "chunked")) { fail(r, "Unsupported Transfer-Encoding"); return; }
             r->chunked = 1;
         } else if (equal(line, "Content-Encoding")) {
             if (encoding++ || !equal(value, "identity")) { fail(r, "Compressed HTTP response is unsupported"); return; }
+        } else if (equal(line, "Content-Type")) {
+            if (r->content_type[0] || strlen(value) >= sizeof(r->content_type)) { fail(r, "Invalid Content-Type"); return; }
+            snprintf(r->content_type, sizeof(r->content_type), "%s", value);
         }
         line = end + 2;
     }
@@ -60,9 +63,17 @@ static void headers(xf_response *r) {
     r->headers_done = 1; r->phase = CHUNK_SIZE;
     if (r->status == 204 || r->status == 304 || (r->has_length && !r->remaining)) r->complete = 1;
 }
-void xf_response_init(xf_response *r) { memset(r, 0, sizeof(*r)); }
+void xf_response_init(xf_response *r) { memset(r, 0, sizeof(*r)); r->body_limit = XF_BODY_LIMIT; }
+void xf_response_stream(xf_response *r, int (*sink)(void *, unsigned char), void *context, size_t limit) {
+    xf_response_init(r); r->sink = sink; r->sink_context = context; r->body_limit = limit;
+}
 static void body_byte(xf_response *r, unsigned char c) {
-    if (r->body_size >= XF_BODY_LIMIT) { fail(r, "HTTP body exceeds 32 KiB limit"); return; }
+    if (r->body_size >= r->body_limit) { fail(r, r->sink ? "Audio stream exceeds size limit" : "HTTP body exceeds 32 KiB limit"); return; }
+    if (r->sink) {
+        if (r->status != 200) { fail(r, "Audio stream HTTP status is not 200"); return; }
+        if (!r->sink(r->sink_context, c)) { fail(r, "Audio receive ring overflow"); return; }
+        ++r->body_size; return;
+    }
     r->body[r->body_size++] = (char)c; r->body[r->body_size] = 0;
 }
 void xf_response_feed(xf_response *r, const void *bytes, size_t size) {
@@ -97,7 +108,7 @@ void xf_response_feed(xf_response *r, const void *bytes, size_t size) {
                     else if (!strchr(r->line, ':')) fail(r, "Malformed HTTP trailer");
                 } else {
                     extension = strchr(r->line, ';'); if (extension) *extension = 0;
-                    if (!number(r->line, &r->remaining, 16) || r->remaining > XF_BODY_LIMIT - r->body_size) fail(r, "Invalid/oversized chunk length");
+                    if (!number(r->line, &r->remaining, 16, r->body_limit) || r->remaining > r->body_limit - r->body_size) fail(r, "Invalid/oversized chunk length");
                     else r->phase = r->remaining ? CHUNK_DATA : CHUNK_TRAILER;
                 }
                 r->line_size = 0;

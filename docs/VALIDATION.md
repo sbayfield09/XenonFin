@@ -1,6 +1,6 @@
 # Validation — 14 October 2026
 
-This page records the initial desktop/baseline validation. **The user subsequently confirmed native 0.2 hardware boot, graphics/controller/audio/Ethernet, HTTP 200 login and a RAM token.** Version 0.3 adds native authenticated browsing; see [NATIVE_BROWSING.md](NATIVE_BROWSING.md) for its build, sanitizer and real Jellyfin 10.10.7 integration checks. New browsing awaits console testing. Earlier statements below about hardware checks refer to the original cloud validation.
+This page records the initial desktop/baseline validation. **The user subsequently confirmed 0.3 on real Xbox hardware:** boot, graphics/controller/audio diagnostics, networking/authentication, libraries, movie pagination and metadata/details. Version 0.4 adds the native MP3 pipeline documented in [NATIVE_MUSIC.md](NATIVE_MUSIC.md): build, waveform/resampling, sanitizer and real Jellyfin direct/transcoded playback/reporting tests passed on the host. **Actual audible Xbox music acceptance remains pending.** Earlier hardware-unverified statements below refer to the original cloud validation.
 
 The runnable target verified here is the **Debian amd64 desktop client**. The Xbox artifact was cross-compiled and inspected, not booted. No XEX or Xbox playback benchmark exists.
 

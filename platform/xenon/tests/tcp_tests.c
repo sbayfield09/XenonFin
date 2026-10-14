@@ -4,25 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static unsigned checks, closes, aborts, frees, writes;
-static int write_oom, close_oom, connect_error;
-static unsigned window=8192;
+static unsigned checks;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr,"native TCP line %d: %s\n",__LINE__,#x);exit(1); } } while(0)
-struct tcp_pcb *tcp_new(void){struct tcp_pcb *p=calloc(1,sizeof(*p));if(p)p->snd_buf=(u16_t)window;return p;}
-void tcp_arg(struct tcp_pcb *p,void *a){p->callback_arg=a;}
-void tcp_recv(struct tcp_pcb *p,tcp_recv_fn f){p->recv=f;}
-void tcp_sent(struct tcp_pcb *p,tcp_sent_fn f){p->sent=f;}
-void tcp_err(struct tcp_pcb *p,tcp_err_fn f){p->errf=f;}
-void tcp_poll(struct tcp_pcb *p,tcp_poll_fn f,u8_t interval){p->poll=f;p->pollinterval=interval;}
-err_t tcp_connect(struct tcp_pcb *p,ip_addr_t *ip,u16_t port,tcp_connected_fn f){(void)ip;CHECK(port==8096);p->connected=f;return (err_t)connect_error;}
-err_t tcp_write(struct tcp_pcb *p,const void *data,u16_t size,u8_t flags){(void)data;CHECK(flags==TCP_WRITE_FLAG_COPY);if(write_oom)return ERR_MEM;CHECK(size<=p->snd_buf);p->snd_buf-=size;++writes;return ERR_OK;}
-err_t tcp_output(struct tcp_pcb *p){(void)p;return ERR_OK;}
-void tcp_recved(struct tcp_pcb *p,u16_t size){(void)p;(void)size;}
-u8_t pbuf_free(struct pbuf *p){u8_t n=0;while(p){struct pbuf *next=p->next;free(p->payload);free(p);++n;++frees;p=next;}return n;}
-err_t tcp_close(struct tcp_pcb *p){if(close_oom)return ERR_MEM;++closes;CHECK(!p->callback_arg&&!p->recv&&!p->sent&&!p->errf);free(p);return ERR_OK;}
-void tcp_abort(struct tcp_pcb *p){++aborts;CHECK(!p->callback_arg&&!p->recv&&!p->sent&&!p->errf);free(p);}
+#include "tcp_fake.h"
 static xf_http_client c;
 static xf_endpoint ep;
+static size_t stream_space = 8192, streamed;
+static size_t space(void *p){(void)p;return stream_space;}
+static int sink(void *p,unsigned char byte){(void)p;(void)byte;++streamed;return 1;}
 static void start(uint32_t now,int auth){xf_http_init(&c);CHECK(xf_http_begin(&c,&ep,"device",auth?"user":NULL,auth?"test-secret":NULL,now));}
 static void establish(void){CHECK(c.pcb->connected(c.pcb->callback_arg,c.pcb,ERR_OK)==ERR_OK);}
 static void data(const char *s){struct pbuf *p=calloc(1,sizeof(*p));p->len=p->tot_len=(u16_t)strlen(s);p->payload=malloc(p->len);memcpy(p->payload,s,p->len);CHECK(c.pcb->recv(c.pcb->callback_arg,c.pcb,p,ERR_OK)==ERR_OK);}
@@ -45,4 +34,15 @@ int main(void){char err[128];size_t i;CHECK(xf_endpoint_parse("192.168.68.202:80
  connect_error=ERR_RTE;xf_http_init(&c);CHECK(!xf_http_begin(&c,&ep,"device",NULL,NULL,0)&&c.done&&!c.active&&c.error_code==ERR_RTE);connect_error=0;
  xf_http_init(&c);CHECK(xf_http_get(&c,&ep,"device","browse-token","/Items?Limit=10",0));CHECK(c.sensitive&&strstr(c.request,"Token=\"browse-token\""));establish();data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");xf_http_tick(&c,1,1);CHECK(c.done&&!c.active&&!c.request[0]);
  CHECK(xf_http_get(&c,&ep,"device","browse-token","/Items",0));establish();data("HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\npartial");xf_http_cancel(&c);CHECK(!c.request[0]&&!c.response.body[0]&&!c.active);
+ CHECK(xf_http_audio(&c,&ep,"device","stream-token","/Audio/id/stream.mp3",sink,space,NULL,0));establish();
+ {
+  const char *wire="HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nmp3";unsigned freed=frees;struct pbuf *p=calloc(1,sizeof(*p));
+  p->len=p->tot_len=(u16_t)strlen(wire);p->payload=malloc(p->len);memcpy(p->payload,wire,p->len);stream_space=0;
+  CHECK(c.pcb->recv(c.pcb->callback_arg,c.pcb,p,ERR_OK)==ERR_MEM);CHECK(frees==freed&&!c.received_size&&!c.response.headers_done&&!streamed);
+  stream_space=8192;CHECK(c.pcb->recv(c.pcb->callback_arg,c.pcb,p,ERR_OK)==ERR_OK);CHECK(frees==freed+1&&streamed==3&&c.response.body_size==3&&c.done);
+ }
+ xf_http_tick(&c,1,1);CHECK(!c.active&&!c.request[0]);
+ CHECK(xf_http_audio(&c,&ep,"device","stream-token","/Audio/id/stream.mp3",sink,space,NULL,0));establish();data("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n");
+ c.backpressure=1;stream_space=0;xf_http_tick(&c,1,1);xf_http_tick(&c,60000,1);CHECK(c.active&&!c.done); /* Capacity-limited pause has no 20s song limit. */
+ stream_space=8192;xf_http_tick(&c,68000,1);CHECK(c.done&&!c.active&&strstr(c.error,"idle"));
  CHECK(writes>0);printf("Native raw TCP callbacks/timeouts/cancellation/cleanup: %u checks passed\n",checks);return 0;}

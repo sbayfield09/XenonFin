@@ -2,7 +2,7 @@
 
 Investigated 14 October 2026 using source checkouts, upstream build rules, and actual compilation. No physical Xbox 360 was connected to this environment.
 
-**Native 0.3 update:** the user has verified version 0.2 through XeLL, including graphics/controller, audio, Ethernet, real Jellyfin HTTP 200 login and a token in RAM. Version 0.3 extends the same native C implementation with authenticated, bounded text library browsing. See [NATIVE_BROWSING.md](NATIVE_BROWSING.md) for controls, build and real-server test evidence. New browsing still requires console acceptance. No native artwork or playback is included.
+**Native 0.4 update (15 October 2026):** the user has confirmed 0.3 XeLL boot, graphics/controller/audio diagnostics, Ethernet/HTTP/authentication, library discovery, movie pagination and metadata/details on a real console. Version 0.4 extends that code with native MP3 streaming, scalar decoding, PCM conversion/output, controls and Jellyfin reports. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md). Host integrations and cross-compilation pass, but audible console music acceptance remains pending. No native artwork or video decoder was added.
 
 ## Verified open-source route
 
@@ -16,7 +16,7 @@ The current upstream source-building script references mirrored GNU/newlib archi
 
 XeLL supplies a bare-metal ELF launch environment. Aurora/XeXMenu ordinarily launch XEX applications in the Xbox OS environment. XEX is a different container and execution environment, with imports, ABI and initialization requirements. Renaming an ELF or wrapping its bytes does not adapt libXenon's privileged bare-metal drivers to the dashboard environment.
 
-No working open-source-only XEX build/runtime/backend combination was established in this investigation. Microsoft's Xbox 360 SDK/XDK headers, libraries, platform services and decoder interfaces were not supplied, copied or downloaded. A future dashboard target needs a legally usable, verified toolchain/runtime and independently implemented platform backends. `default.xex` is not generated. The present native build supports connectivity/authentication, text library browsing and diagnostics; it is not the completed music/video client.
+No working open-source-only XEX build/runtime/backend combination was established in this investigation. Microsoft's Xbox 360 SDK/XDK headers, libraries, platform services and decoder interfaces were not supplied, copied or downloaded. A future dashboard target needs a legally usable, verified toolchain/runtime and independently implemented platform backends. `default.xex` is not generated. The present native build supports connectivity/authentication, text library browsing, diagnostics and a native MP3 pipeline awaiting audible hardware acceptance; video integration is still absent.
 
 ## Existing player evidence
 
@@ -36,22 +36,22 @@ Progress against the requested stages:
 
 | Stage | Result |
 |---|---|
-| 1: native boot/graphics/controller | Baseline boot, graphics, navigation, audio and Ethernet reported working by user; new build and model matrix still need hardware verification |
-| 2: console connection/auth | Native IPv4 HTTP, DHCP verification, keyboard and login implemented/cross-built; C protocol tested against real Jellyfin on host; console test pending |
-| 3: console browsing/search | Desktop implementation only; native integration remains |
-| 4: console music | Real desktop MP3/AAC/FLAC decode/output path; no console integration |
-| 5: console local video decoder | Desktop FFmpeg decoding tested; Xenon decoder integration absent |
-| 6: Jellyfin negotiation/stream/report | Desktop integration tested against real Jellyfin; native integration absent |
-| 7: optimize/HD | Desktop synthetic 720p tests only; no Xbox resolution/FPS claim |
-| 8: packaging | Source, Linux client and labeled native diagnostic archives; no XEX |
+| 1: native boot/graphics/controller | Version 0.3 confirmed on hardware by user; broader model/output matrix unrun |
+| 2: console connection/auth | Native DHCP/HTTP/keyboard/login working on console in 0.3 |
+| 3: console browsing/search | Native discovery/movie paging/metadata confirmed in 0.3; TV/music hierarchy API tested; native search absent |
+| 4: console music | 0.4 native MP3 streaming/decoding/PCM conversion/output implemented and host-tested; actual audible music still needs console acceptance |
+| 5: console local video decoder | Desktop FFmpeg decoding tested; Xenon video integration absent |
+| 6: Jellyfin negotiation/stream/report | Native 0.4 music negotiation, direct/transcoded MP3 and reports pass real Jellyfin host integration; console music acceptance pending |
+| 7: optimize/HD | Desktop synthetic 720p tests only; no Xbox video resolution/FPS claim |
+| 8: packaging | Source, Linux desktop, current XeLL ELF/archive and unchanged 0.3/0.2 rollback ELFs; no XEX |
 
 ## Work needed to finish the Xbox client
 
-1. Verify the updated HTTP/authentication build using NATIVE_HTTP.md. The user's baseline boot/platform results are retained; hotplug/repeat, exact display modes, model matrix and the new network adapters still require hardware checks. Do not advance native video until console connectivity/login work.
-2. Choose and prove a console media runtime: maintain an open-source bare-metal decoder/player port, or provide a legally usable dashboard runtime. Benchmark local clips before making network/player claims.
-3. Verify the implemented native authenticated library browsing on hardware. Persistence and a verified TLS backend remain future work; HTTPS is currently rejected explicitly. The desktop `std::thread`/POSIX/SDL/FreeType stack is not assumed to cross-compile to libXenon.
-4. Integrate Xenos texture uploads/scaling, endian-correct PCM submission, queued-audio clock, seek/reset, decoder cleanup and controller UI. Validate each with local samples before Jellyfin streaming.
-5. Expose a native device profile containing only measured capabilities. Start with 480p and 720p H.264 Baseline/Main. If CPU decoding is insufficient, benchmark server-side lighter-codec alternatives such as MPEG-2 with the chosen decoder, including network bitrate and A/V timing. Do not advertise those paths before measuring them.
-6. Test actual server negotiation, transcoding/tone mapping, seek/reconnect/resume, and long-term memory stability. Complete the hardware checklist and record results. Only then describe the application as a native functioning Xbox client.
+1. Complete [0.4 music hardware acceptance](NATIVE_MUSIC.md), including recognizable decoded music through the physical output. The user's working 0.3 results remain established. A working tone or successful host test is insufficient for music acceptance.
+2. Measure sustained MP3 decode/output, mono/stereo resampling, UI responsiveness, queued-audio clock, pause/stop/skip, cable-loss recovery and long-run memory behavior on the console. Validate the scoped framebuffer flush batching at the user's display mode.
+3. Keep native video and artwork deferred until music works on hardware. A later video effort still needs a maintained bare-metal decoder/player integration and real local-clip benchmarks before streaming claims.
+4. Persistence and a verified TLS backend remain future work as needed. HTTPS is rejected explicitly; the desktop POSIX/SDL/FFmpeg stack is not assumed to cross-compile to libXenon.
+5. For a future native video decoder, integrate Xenos presentation, seek/reset and A/V synchronization, then advertise only measured capabilities in a separate device profile. The current native profile advertises MP3 audio only.
+6. Complete the relevant hardware acceptance matrix before claiming broader codec, model, resolution or stability support.
 
-The missing native runtime/integration and physical test hardware are substantive remaining work. They are not resolved by a successful desktop test, a renamed artifact, or a publication snapshot.
+The remaining native video work and physical music acceptance are not resolved by host API/decoder tests or successful cross-compilation.

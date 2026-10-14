@@ -19,7 +19,8 @@ import zipfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def main():
-    browsing = '--browse' in sys.argv[1:]
+    music = '--music' in sys.argv[1:]
+    browsing = '--browse' in sys.argv[1:] or music
     binary = pathlib.Path(os.environ.get('JELLYFIN_TEST_SERVER', '/workspace/setup/jellyfin-server/jellyfin'))
     probe = pathlib.Path(os.environ.get('JELLYFIN_NATIVE_PROBE', str(ROOT / 'build/native-tests/probe')))
     if not binary.is_file() or not probe.is_file():
@@ -51,8 +52,9 @@ def main():
             album = work/'music/Native Artist/Native Album'
             album.mkdir(parents=True)
             for index in (1, 2):
-                subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-                    '-t', '1', '-c:a', 'libmp3lame', '-metadata', 'artist=Native Artist', '-metadata', 'album_artist=Native Artist',
+                signal = ('sine=frequency=440:sample_rate=44100' if index == 1 else 'aevalsrc=0.2*sin(2*PI*440*t)|0.2*sin(2*PI*997*t):s=48000') if music else 'anullsrc=r=44100:cl=stereo'
+                subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', signal,
+                    '-t', '12' if music else '1', '-ac', '1' if music and index == 1 else '2', '-c:a', 'libmp3lame', '-b:a', '192k', '-metadata', 'artist=Native Artist', '-metadata', 'album_artist=Native Artist',
                     '-metadata', 'album=Native Album', '-metadata', f'title=Native Track {index}', '-metadata', f'track={index}',
                     str(album/f'{index:02d} Native Track.mp3')], check=True)
         with socket.socket() as s:
@@ -142,6 +144,36 @@ def main():
                     if result.returncode:
                         raise RuntimeError('Restricted native browsing failed: '+result.stderr.strip())
                     print(result.stdout.strip(), flush=True)
+                    if music:
+                        album = work/'music/Native Artist/Native Album'
+                        subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=44100',
+                            '-t', '2', '-c:a', 'flac', '-metadata', 'artist=Native Artist', '-metadata', 'album_artist=Native Artist',
+                            '-metadata', 'album=Native Album', '-metadata', 'title=Native Track 3', '-metadata', 'track=3',
+                            str(album/'03 Native Track.flac')], check=True)
+                        api('/Library/Refresh', {}, 'POST')
+                        for _ in range(160):
+                            tracks = api('/Users/'+user_id+'/Items?Recursive=true&IncludeItemTypes=Audio&EnableImages=false')['Items']
+                            if len(tracks) == 3:
+                                break
+                            time.sleep(.25)
+                        if len(tracks) != 3:
+                            raise RuntimeError('Real server did not index the additional audio transcoding fixture')
+                        music_probe = pathlib.Path(os.environ.get('JELLYFIN_MUSIC_PROBE', str(ROOT/'build/native-tests/music-probe')))
+                        result = subprocess.run([str(music_probe), base], env={**env, 'JELLYFIN_ACCESS_TOKEN': token, 'JELLYFIN_USER_ID': user_id},
+                            capture_output=True, text=True, timeout=90)
+                        if result.returncode or result.stderr.strip():
+                            raise RuntimeError('Real native music playback failed: '+result.stderr.strip())
+                        if token in result.stdout+result.stderr or password in result.stdout+result.stderr:
+                            raise RuntimeError('Secret appeared in native playback output')
+                        print(result.stdout.strip(), flush=True)
+                        for track in tracks:
+                            detail = api('/Users/'+user_id+'/Items/'+track['Id'])
+                            if detail.get('UserData', {}).get('PlayCount', 0) < 1:
+                                raise RuntimeError('Real Jellyfin did not record native music playback start: '+track['Type'])
+                        sessions = api('/Sessions')
+                        if any(session.get('NowPlayingItem') for session in sessions):
+                            raise RuntimeError('Real Jellyfin playback stop report did not clear the playing item')
+                        print('Real Jellyfin native music start/progress/stop, MP3 direct streams, FLAC→MP3 and transcoder cleanup PASS', flush=True)
             finally:
                 process.terminate()
                 try:

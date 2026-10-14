@@ -8,15 +8,25 @@ CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 endif
 COMMON := ../protocol.c ../json.c ../http.c ../browse.c
 COMMON_HEADERS := ../protocol.h ../browse.h
+MUSIC := ../audio_decode.c ../music_api.c
+MUSIC_HEADERS := ../audio_decode.h ../music_api.h ../third_party/minimp3/minimp3.h
 .PHONY: all test
-all: $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests $(OUT)/probe
+all: $(OUT)/music-fault-tests $(OUT)/music-probe $(OUT)/music-protocol-tests $(OUT)/decode-probe $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests $(OUT)/probe
 $(OUT):
 	mkdir -p $@
+$(OUT)/music-protocol-tests: music_protocol_tests.c $(COMMON) $(MUSIC) ../text.c ../console_batch.c $(COMMON_HEADERS) $(MUSIC_HEADERS) | $(OUT)
+	$(HOST_CC) $(CFLAGS) music_protocol_tests.c $(COMMON) $(MUSIC) ../text.c ../console_batch.c -o $@
+$(OUT)/decode-probe: decode_probe.c ../audio_decode.c ../protocol.c ../json.c $(MUSIC_HEADERS) ../protocol.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) decode_probe.c ../audio_decode.c ../protocol.c ../json.c -o $@
+$(OUT)/music-probe: music_probe.c posix_tcp.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) $(COMMON_HEADERS) $(MUSIC_HEADERS) ../music.h ../native_net.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include music_probe.c posix_tcp.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) -o $@
+$(OUT)/music-fault-tests: music_fault_tests.c tcp_fake.h ../music.c ../tcp_client.c $(COMMON) $(MUSIC) $(COMMON_HEADERS) $(MUSIC_HEADERS) ../music.h ../native_net.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include music_fault_tests.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) -o $@
 $(OUT)/browse-tests: browse_tests.c $(COMMON) $(COMMON_HEADERS) ../browse.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) browse_tests.c $(COMMON) -o $@
 $(OUT)/protocol-tests: protocol_tests.c $(COMMON) $(COMMON_HEADERS) | $(OUT)
 	$(HOST_CC) $(CFLAGS) protocol_tests.c $(COMMON) -o $@
-$(OUT)/tcp-tests: tcp_tests.c ../tcp_client.c $(COMMON) $(COMMON_HEADERS) ../native_net.h | $(OUT)
+$(OUT)/tcp-tests: tcp_tests.c tcp_fake.h ../tcp_client.c $(COMMON) $(COMMON_HEADERS) ../native_net.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include tcp_tests.c ../tcp_client.c $(COMMON) -o $@
 $(OUT)/probe: probe.c $(COMMON) $(COMMON_HEADERS) | $(OUT)
 	$(HOST_CC) $(CFLAGS) probe.c $(COMMON) -o $@
@@ -26,7 +36,9 @@ $(OUT)/network-tests: network_tests.c ../native_net.c $(COMMON) ../native_net.h 
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include network_tests.c ../native_net.c $(COMMON) -o $@
 $(OUT)/init-tests: init_tests.c ../init_guard.c ../driver_guard.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include init_tests.c ../init_guard.c -o $@
-test: $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests
+test: $(OUT)/music-fault-tests $(OUT)/music-protocol-tests $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests
+	$(OUT)/music-fault-tests
+	$(OUT)/music-protocol-tests
 	$(OUT)/browse-tests
 	$(OUT)/protocol-tests
 	$(OUT)/tcp-tests

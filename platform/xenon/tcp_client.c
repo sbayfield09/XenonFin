@@ -55,6 +55,12 @@ static err_t received(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     xf_http_client *c = (xf_http_client *)arg;
     struct pbuf *part;
     if (p) {
+        /* ERR_MEM transfers no ownership and acknowledges no bytes. lwIP retains
+         * and retries this exact pbuf, including when playback is paused. */
+        if (c->streaming && !c->done && err == ERR_OK && c->receive_space(c->stream_context) < p->tot_len) {
+            c->backpressure = 1; return ERR_MEM;
+        }
+        c->backpressure = 0;
         c->received_size += p->tot_len;
         if (err != ERR_OK) error(c, err, tcp_error(err));
         else {
@@ -81,7 +87,7 @@ static void lost(void *arg, err_t err) {
     if (!c->response.complete) error(c, err, tcp_error(err));
     else c->done = 1;
 }
-void xf_http_init(xf_http_client *c) { memset(c, 0, sizeof(*c)); }
+void xf_http_init(xf_http_client *c) { memset(c, 0, sizeof(*c)); xf_response_init(&c->response); }
 void xf_http_cancel(xf_http_client *c) {
     if (!c->active) return;
     error(c, 0, "Request cancelled"); detach(c, 0);
@@ -115,13 +121,31 @@ int xf_http_get(xf_http_client *c, const xf_endpoint *ep, const char *device,
     count = xf_get_request(c->request, sizeof(c->request), ep, device, token, resource);
     return begin_transport(c, ep, count, now);
 }
+int xf_http_api(xf_http_client *c, const xf_endpoint *ep, const char *device, const char *token,
+                const char *method, const char *resource, const char *json, uint32_t now) {
+    int count;
+    xf_http_cancel(c); xf_http_init(c); c->sensitive = 1;
+    count = xf_api_request(c->request, sizeof(c->request), ep, device, token, method, resource, json, 0);
+    return begin_transport(c, ep, count, now);
+}
+int xf_http_audio(xf_http_client *c, const xf_endpoint *ep, const char *device, const char *token,
+                  const char *resource, int (*sink)(void *, unsigned char), size_t (*space)(void *), void *context, uint32_t now) {
+    int count;
+    xf_http_cancel(c); xf_http_init(c); c->sensitive = 1; c->streaming = 1;
+    if (!sink || !space) { error(c, 0, "Missing audio receiver"); return 0; }
+    c->receive_space = space; c->stream_context = context;
+    xf_response_stream(&c->response, sink, context, 512U * 1024U * 1024U);
+    count = xf_api_request(c->request, sizeof(c->request), ep, device, token, "GET", resource, NULL, 1);
+    return begin_transport(c, ep, count, now);
+}
 void xf_http_tick(xf_http_client *c, uint32_t now, int ready) {
     if (!c->active) return;
     /* Tick observes receive/ACK activity without depending on a hardware clock in callbacks. */
     size_t progress = c->received_size + c->acknowledged + (size_t)c->connected;
     if (progress != c->observed) { c->observed = progress; c->progress = now; }
     if (!c->done && !ready) error(c, 0, "DHCP lease/link unavailable; reconnect network");
-    if (!c->done && (uint32_t)(now - c->began) >= 20000) error(c, ERR_TIMEOUT, "HTTP total timeout (20 seconds)");
+    if (c->streaming && c->connected && c->backpressure && c->receive_space(c->stream_context) < TCP_WND) c->progress = now;
+    if (!c->done && (!c->streaming || !c->response.headers_done) && (uint32_t)(now - c->began) >= 20000) error(c, ERR_TIMEOUT, "HTTP total timeout (20 seconds)");
     if (!c->done && !c->connected && (uint32_t)(now - c->began) >= 8000) error(c, ERR_TIMEOUT, "TCP connect timeout (8 seconds)");
     if (!c->done && c->connected && (uint32_t)(now - c->progress) >= 8000) error(c, ERR_TIMEOUT, "HTTP idle timeout (8 seconds)");
     if (c->done) { detach(c, !c->error[0]); return; }

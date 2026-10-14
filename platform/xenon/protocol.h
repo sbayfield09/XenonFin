@@ -31,6 +31,9 @@ int xf_request(char *, size_t, const xf_endpoint *, const char *device_id,
                const char *username, const char *password);
 int xf_get_request(char *, size_t, const xf_endpoint *, const char *device_id,
                    const char *token, const char *resource);
+int xf_api_request(char *, size_t, const xf_endpoint *, const char *device_id,
+                   const char *token, const char *method, const char *resource,
+                   const char *json_body, int audio);
 
 typedef struct {
     char header[XF_HEADER_LIMIT + 1];
@@ -39,9 +42,14 @@ typedef struct {
     char error[128];
     size_t header_size, body_size, line_size, remaining, trailer_size;
     int status, headers_done, complete, failed, chunked, has_length, phase;
+    size_t body_limit;
+    int (*sink)(void *, unsigned char);
+    void *sink_context;
+    char content_type[80];
 } xf_response;
 
 void xf_response_init(xf_response *);
+void xf_response_stream(xf_response *, int (*sink)(void *, unsigned char), void *, size_t limit);
 void xf_response_feed(xf_response *, const void *, size_t);
 void xf_response_eof(xf_response *);
 int xf_public_info(const xf_response *, char *server, size_t, char *version, size_t);

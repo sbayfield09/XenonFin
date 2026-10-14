@@ -1,6 +1,6 @@
 # Xbox 360 acceptance checklist
 
-**User-reported version 0.2 results:** XeLL launch, graphics, controller navigation, audio, Ethernet, Jellyfin HTTP communication, username/password login, HTTP 200 and a token in RAM work on a real console. Exact model/modes were not supplied. Version 0.3 adds authenticated library browsing and still needs console acceptance; see [NATIVE_BROWSING.md](NATIVE_BROWSING.md). Record model, video cable/mode, XeLL version, exact source revision, toolchain digest, server version and wired route with each result. The later playback rows below are future targets, not features of 0.3.
+**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **actual decoded music has not yet been heard on Xbox by this development session**. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
 
 | Check | Expected behavior | Status |
 |---|---|---|
@@ -12,12 +12,12 @@
 | Initial server / hostname / base path | RAM-only numeric IPv4 HTTP in native 0.3; hostname/base path remain unsupported | Native HTTP communication confirmed in 0.2 |
 | Username/password / invalid credentials | Masked entry, safe errors, no secrets in logs | Successful native login/token confirmed in 0.2; failure matrix unrun |
 | Valid token restart / expiry / logout | Session reuse and reauthentication | Unrun |
-| Movies / shows / seasons / episodes | Real hierarchy, metadata and 10-item pages | Native 0.3 implemented; console unrun |
-| Artists / albums / tracks | Real hierarchy and alternate music views; no playback queue yet | Native 0.3 implemented; console unrun |
+| Movies / shows / seasons / episodes | Real hierarchy, metadata and 10-item pages | Movies confirmed in 0.3; TV hierarchy host-tested, console matrix unrun |
+| Artists / albums / tracks | Real hierarchy, metadata and bounded neighbor fetching | Native 0.4 host-tested; console acceptance pending |
 | Search / cancel / empty result | Real grouped server results, UI remains responsive | Unrun |
 | Artwork / malformed image / cache churn | Correct resized images, stable memory | Unrun |
-| MP3 / AAC / FLAC conversion | Real synchronized audio output | Unrun |
-| Queue / skip / previous / shuffle / repeat | Correct sequence without resource growth | Unrun |
+| MP3 / mono / stereo / rate conversion | Native MP3 → 48 kHz stereo S16LE; optional server MP3 transcode | Actual compressed decode and real Jellyfin host tests pass; audible Xbox output pending |
+| Music pause / resume / stop / skip / natural advance | Responsive UI and accurate queued-PCM progress | Native 0.4 host-tested; console pending; shuffle/repeat absent |
 | 480p H.264/AAC local then streamed | Sustained measured decode and A/V synchronization | Unrun |
 | 720p30 Baseline / Main | Sustained measured throughput at 3–5 Mbps | Unrun |
 | High profile / 1080p | Only enable if supported by measurements | Unrun |

@@ -10,3 +10,4 @@ __pycache__/
 *.log
 !/dist/xenonfin-xell-http.elf
 !/dist/xenonfin-xell-browse.elf
+!/dist/xenonfin-xell-music.elf

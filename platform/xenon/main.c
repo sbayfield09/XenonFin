@@ -15,13 +15,18 @@
 #include "native_net.h"
 #include "driver_guard.h"
 #include "browse.h"
+#include "music.h"
+#include "text.h"
+#include "console_batch.h"
 
 static const char *sections[] = {
     "Graphics / controller", "Network / DHCP diagnostics", "Audio output",
-    "Platform status", "Jellyfin server", "Jellyfin login", "Libraries"
+    "Platform status", "Jellyfin server", "Jellyfin login", "Libraries", "Now playing"
 };
 static xf_http_client http;
 static xf_browser browser;
+static xf_music music;
+static unsigned text_width = 72;
 enum { REQUEST_PUBLIC, REQUEST_LOGIN, REQUEST_BROWSE };
 static int request_kind;
 static xf_keyboard keyboard;
@@ -44,6 +49,7 @@ uint32_t xf_monotonic_ms(void) {
     return (uint32_t)((((uint64_t)high << 32) | low) / (PPC_TIMEBASE_FREQ / 1000));
 }
 static void logout(void) {
+    xf_music_forget(&music);
     authenticated = 0; xf_wipe(token, sizeof(token)); xf_wipe(user_id, sizeof(user_id)); xf_wipe(user_name, sizeof(user_name));
     xf_browser_init(&browser);
 }
@@ -126,19 +132,41 @@ static void handle_result(void) {
     else snprintf(result, sizeof(result), "HTTP %d: response was not valid Jellyfin server information.", http.response.status);
     if (http.sensitive) xf_wipe(&http.response, sizeof(http.response)); /* Never render auth JSON, even on failure. */
 }
+static void wrapped(const char *text, unsigned skip, unsigned lines) {
+    char line[161]; size_t at = 0; unsigned n = 0, printed = 0;
+    while (xf_text_line(text, &at, text_width, line, sizeof(line))) {
+        if (n++ < skip) continue;
+        if (printed++ == lines) break;
+        printf("  %s\n", line);
+    }
+}
+static void cell(const char *text, unsigned width) {
+    char out[161]; xf_text_cell(out, sizeof(out), text, width); printf("%s", out);
+}
+static int play_selected(uint32_t now) {
+    const xf_item *it = browser.details ? &browser.detail : browser.page.count ? &browser.page.items[browser.current.selected] : NULL;
+    char device[65];
+    if (!it || strcmp(it->type, "Audio")) return 0;
+    if (!authenticated || !xf_network_ready()) { snprintf(result, sizeof(result), "Sign in and verify networking before playing music."); return 0; }
+    snprintf(device, sizeof(device), "xenonfin-%02x%02x%02x%02x%02x%02x", netif.hwaddr[0], netif.hwaddr[1], netif.hwaddr[2], netif.hwaddr[3], netif.hwaddr[4], netif.hwaddr[5]);
+    return xf_music_play(&music, &endpoint, device, token, user_id, it, &browser.current,
+        browser.current.start + browser.current.selected, browser.page.total, now);
+}
 static void detail_line(const char *label, const char *value) {
-    if (*value) { printf("  %s", label); safe_print(value, 68); printf("\n"); }
+    if (*value) { printf("  %s", label); cell(value, text_width > strlen(label) ? text_width - (unsigned)strlen(label) : 1); printf("\n"); }
 }
 static void draw_browser(void) {
     unsigned i;
     if (!authenticated) { printf("\n  Sign in first, then A loads your accessible libraries.\n"); return; }
-    printf("\n  "); safe_print(browser.current.title, 65);
+    printf("\n  "); cell(browser.current.title, text_width - 10);
     if (browser.current.view >= XF_ARTISTS && browser.current.view <= XF_TRACKS)
         printf(" / %s", browser.current.view == XF_ARTISTS ? "Artists" : browser.current.view == XF_ALBUMS ? "Albums" : "Tracks");
     printf("\n");
     if (browser.details) {
         const xf_item *it = &browser.detail;
-        for (i = 0; i < strlen(it->name); i += 68) { printf("  "); safe_print(it->name + i, 68); printf("\n"); }
+        unsigned count = xf_text_lines(it->overview, text_width), rows;
+        int remaining;
+        wrapped(it->name, 0, 3);
         detail_line("Type: ", it->type); detail_line("Media: ", it->media); detail_line("Library type: ", it->collection);
         printf("  Year: %u  Runtime: %llu:%02llu  Played: %s\n", it->year,
             (unsigned long long)(it->ticks / 600000000), (unsigned long long)(it->ticks / 10000000 % 60), it->played ? "yes" : "no");
@@ -147,25 +175,51 @@ static void draw_browser(void) {
         if (it->children) printf("  Children: %u\n", it->children);
         detail_line("Series: ", it->series); detail_line("Artist: ", it->artist); detail_line("Album: ", it->album);
         detail_line("Rating: ", it->rating); detail_line("Genres: ", it->genres);
-        printf("  Overview (up to 768 bytes; Up/Down scrolls):\n");
-        for (i = browser.detail_scroll * 68; i < strlen(it->overview) && i < (browser.detail_scroll + 4) * 68; i += 68) { printf("  "); safe_print(it->overview + i, 68); printf("\n"); }
+        printf("  Overview (Up/Down scrolls):\n");
+        remaining = console_get_cursor_max_y() - console_get_cursor_y() - 5;
+        rows = remaining > 0 ? (unsigned)remaining : 1; if (rows > 8) rows = 8;
+        if (count <= rows) browser.detail_scroll = 0;
+        else if (browser.detail_scroll > count - rows) browser.detail_scroll = count - rows;
+        wrapped(it->overview, browser.detail_scroll, rows);
         if (!it->overview[0]) printf("  No overview supplied by server.\n");
-        printf("  B: return to list. Playback is not implemented.\n");
+        printf(!strcmp(it->type, "Audio") ? "  A: play music   B: list   Back/View: now playing\n" : "  B: return to list. Video playback is not implemented.\n");
     } else {
         if (!browser.loaded) printf("  A: load accessible Jellyfin libraries.\n");
         else if (!browser.page.count) printf("  Empty page / library. X refreshes; B goes back.\n");
+        printf("    "); cell("TITLE", text_width - 20); printf(" | "); cell("TYPE", 14); printf("\n");
         for (i = 0; i < browser.page.count; ++i) {
-            printf("  %c ", i == browser.current.selected ? '>' : ' '); safe_print(browser.page.items[i].name, 46);
-            printf(" ["); safe_print(browser.current.view == XF_VIEWS && browser.page.items[i].collection[0] ? browser.page.items[i].collection : browser.page.items[i].type, 16); printf("]\n");
+            printf("  %c ", i == browser.current.selected ? '>' : ' '); cell(browser.page.items[i].name, text_width - 20);
+            printf(" | "); cell(browser.current.view == XF_VIEWS && browser.page.items[i].collection[0] ? browser.page.items[i].collection : browser.page.items[i].type, 14); printf("\n");
         }
         if (browser.page.count) {
             const xf_item *it = &browser.page.items[browser.current.selected];
             printf("  Items %u-%u of %u  |  Year %u  Runtime %llu min\n", browser.current.start + 1,
                 browser.current.start + browser.page.count, browser.page.total, it->year, (unsigned long long)(it->ticks / 600000000));
-            printf("  Selected: "); safe_print(it->name, 66); printf("\n");
+            if (!strcmp(it->type, "Audio")) {
+                detail_line("Artist: ", it->artist); detail_line("Album: ", it->album);
+                printf("  Track %u | %llu:%02llu | A: play | Y: details\n", it->index,
+                    (unsigned long long)(it->ticks / 600000000), (unsigned long long)(it->ticks / 10000000 % 60));
+            } else { printf("  Selected: "); cell(it->name, text_width - 10); printf("\n"); }
         }
         printf("  Up/Down: select  Left/Right: page  A: open  Y: details\n  B: back  X: refresh  Start: music artists/albums/tracks\n");
     }
+}
+static void draw_player(void) {
+    uint64_t seconds = xf_music_position(&music) / 10000000;
+    char line[180];
+    printf("\n"); wrapped(xf_music_status(&music), 0, 2);
+    detail_line("Title: ", music.track.name); detail_line("Artist: ", music.track.artist); detail_line("Album: ", music.track.album);
+    printf("  Track %u | %llu:%02llu / %llu:%02llu\n", music.track.index,
+        (unsigned long long)(seconds / 60), (unsigned long long)(seconds % 60),
+        (unsigned long long)(music.track.ticks / 600000000), (unsigned long long)(music.track.ticks / 10000000 % 60));
+    snprintf(line, sizeof(line), "Stream: HTTP %d | %s | input %u Hz / %u channel(s)", music.stream_status,
+        music.source.transcode ? "server MP3 transcode" : "MP3 direct", music.decoder.rate, music.decoder.channels);
+    wrapped(line, 0, 2);
+    printf("  Output: 48000 Hz stereo S16 little endian\n  Decoded MP3 frames: %u | PCM played: %llu frames\n", music.decoder.mp3_frames, (unsigned long long)music.played);
+    printf("  Buffers: compressed %u/128 KiB, PCM %u/128 KiB\n  Rebuffer events: %u | Last reporting HTTP: %d\n",
+        (unsigned)(music.decoder.input_size / 1024), (unsigned)(music.decoder.pcm_size / 1024), music.underruns, music.report_status);
+    wrapped(music.message, 0, 3); if (music.report_message[0]) wrapped(music.report_message, 0, 2);
+    printf("\n  A/Start: pause/resume   X: stop\n  Left/Right: previous/next track\n  B: library (music continues)   LB/RB: sections\n");
 }
 static void draw_keyboard(void) {
     size_t i;
@@ -202,16 +256,18 @@ static void draw_network(void) {
 }
 static void draw(int selected) {
     int i;
-    console_set_colors(0xff101624, 0xffe6eaf4); console_clrscr();
-    printf("\n  XENONFIN - XeLL / Jellyfin library browsing 0.3\n");
-    printf("  Existing graphics/controller/audio/Ethernet diagnostics retained.\n");
-    if (editing) { draw_keyboard(); printf("\n  "); safe_print(result, 150); printf("\n"); return; }
-    if (selected == 6) printf("  > Libraries (LB/RB: other sections)\n");
-    else for (i = 0; i < 7; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
-    printf("\n  LB/RB: sections  D-pad: navigate  A: select  B: cancel/back\n");
+    unsigned width;
+    console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
+    if (text_width > 100) text_width = 100;
+    console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
+    printf("\n  XENONFIN 0.4 - XeLL / MP3 music streaming\n");
+    if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
+    if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
+    else for (i = 0; i < 8; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
+    if (selected < 6) printf("\n  LB/RB: sections  D-pad: navigate  A: select  B: back\n");
     if (selected == 0) printf("\n  Graphics initialized; controller input is polled.\n  Hardware boot, rendering, navigation and audio confirmed by user.\n");
     if (selected == 1) draw_network();
-    if (selected == 2) printf("\n  Press A for the existing 440 Hz stereo PCM tone.\n");
+    if (selected == 2) printf("\n  A: existing 440 Hz stereo PCM diagnostic.\n  During music, A stops it first; press A again after it stops.\n");
     if (selected == 3) printf("\n  XeLL ELF; no XEX conversion.\n  Native raw lwIP TCP: no socket or DNS layer, no TLS.\n  HTTP connect/idle timeout 8s; total request timeout 20s.\n  DHCP and HTTP continue while navigating/typing.\n  Server/username/token are RAM-only; password wiped on submit.\n  Video decoding is not part of this build.\n");
     if (selected == 4) {
         printf("\n  Server: "); safe_print(address[0] ? address : "not set", XF_TEXT_LIMIT);
@@ -235,23 +291,34 @@ static void draw(int selected) {
         if (authenticated) { printf("  Authenticated user: "); safe_print(user_name[0] ? user_name : username, 100); printf("\n  Token received and kept in RAM only.\n"); }
     }
     if (selected == 6) draw_browser();
+    if (selected == 7) draw_player();
     if (selected == 4 || selected == 5 || selected == 6 || http.active) {
-        printf("\n  "); safe_print(result, sizeof(result)); printf("\n");
+        wrapped(result, 0, 3);
         if (http.active) printf("  %s  Sent %u/%u bytes  Received %u bytes\n", http.connected ? "Waiting for HTTP" : "Connecting TCP", (unsigned)http.queued, (unsigned)http.request_size, (unsigned)http.received_size);
     }
-    if (selected != 6) printf("\n  B exits to XeLL only outside keyboard/request/login/libraries.\n");
+    if (selected < 6) printf("\n  B exits outside keyboard/request/login/library/player.\n");
+    xf_console_end();
 }
+static int audio_queued(void *context) { (void)context; return xenon_sound_get_unplayed(); }
+static int audio_free(void *context) { (void)context; return xenon_sound_get_free(); }
+static void audio_submit(void *context, const unsigned char *bytes, size_t size) { (void)context; xenon_sound_submit((void *)bytes, (int)size); }
 int main(void) {
     struct controller_data_s pad, previous;
     int selected = 0, redraw = 1;
     char held = 0;
     uint32_t repeat_at = 0, last_draw = 0;
+    xf_audio_backend audio = { audio_queued, audio_free, audio_submit, NULL };
     memset(&previous, 0, sizeof(previous)); xf_http_init(&http); xf_browser_init(&browser);
+    xf_music_init(&music, &audio);
     /* Preserve the hardware-tested initialization order. */
     xenos_init(VIDEO_MODE_AUTO); console_init(); usb_init(); xenon_sound_init();
     for (;;) {
         uint32_t now = xf_monotonic_ms(); char direction = 0, move = 0;
         xf_network_tick(now); xf_http_tick(&http, now, xf_network_ready());
+        xf_music_tick(&music, now, xf_network_ready());
+        if (music.session_expired) {
+            xf_http_cancel(&http); processed = 1; logout(); snprintf(result, sizeof(result), "HTTP 401: music session expired. Sign in again."); redraw = 1;
+        }
         if (!processed && http.done && !http.active) { handle_result(); redraw = 1; }
         usb_do_poll(); memset(&pad, 0, sizeof(pad)); get_controller_data(&pad, 0);
         if (pad.left || pad.s1_x < -18000) direction = 'L';
@@ -269,16 +336,21 @@ int main(void) {
             if (pad.b && !previous.b) { xf_wipe(&keyboard, sizeof(keyboard)); editing = 0; redraw = 1; }
         } else {
             int old_selected = selected;
-            if (pad.rb && !previous.rb) { selected = (selected + 1) % 7; redraw = 1; }
-            if (pad.lb && !previous.lb) { selected = (selected + 6) % 7; redraw = 1; }
+            if (pad.rb && !previous.rb) { selected = (selected + 1) % 8; redraw = 1; }
+            if (pad.lb && !previous.lb) { selected = (selected + 7) % 8; redraw = 1; }
+            if (pad.back && !previous.back) { selected = 7; redraw = 1; }
             if (move == 'U' || move == 'D') {
                 if (selected == 5) login_selected = (login_selected + (move == 'D' ? 1 : 3)) % 4;
-                else if (selected == 6) xf_browser_move(&browser, move == 'D' ? 1 : -1);
-                else selected = (selected + (move == 'D' ? 1 : 6)) % 7;
+                else if (selected == 6) {
+                    if (browser.details) { if (move == 'D') ++browser.detail_scroll; else if (browser.detail_scroll) --browser.detail_scroll; }
+                    else xf_browser_move(&browser, move == 'D' ? 1 : -1);
+                }
+                else if (selected != 7) selected = (selected + (move == 'D' ? 1 : 7)) % 8;
                 redraw = 1;
             }
             if (old_selected != 6 && selected == 6 && !browser.loaded && authenticated) browse_request(XF_ROOT, now);
             if (selected == 6 && (move == 'L' || move == 'R')) { browse_request(move == 'R' ? XF_NEXT : XF_PREVIOUS, now); redraw = 1; }
+            if (selected == 7 && (move == 'L' || move == 'R')) { xf_music_skip(&music, move == 'R' ? 1 : -1, now); redraw = 1; }
             if (pad.b && !previous.b) {
                 if (http.active) { xf_http_cancel(&http); handle_result(); }
                 else if (selected == 6) {
@@ -286,6 +358,7 @@ int main(void) {
                     else browse_request(XF_BACK, now);
                 }
                 else if (selected == 5) selected = 4;
+                else if (selected == 7) selected = 6;
                 else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); return 0; }
                 redraw = 1;
             }
@@ -296,26 +369,36 @@ int main(void) {
                 if (pad.x && !previous.x) { browse_request(XF_REFRESH, now); redraw = 1; }
                 if (pad.start && !previous.start) { browse_request(XF_MUSIC, now); redraw = 1; }
             }
+            if (selected == 7) {
+                if (pad.x && !previous.x) { xf_music_stop(&music, now); redraw = 1; }
+                if ((pad.start && !previous.start) || (pad.a && !previous.a)) { xf_music_pause(&music); redraw = 1; }
+            }
             if (pad.a && !previous.a) {
                 if (selected == 1) {
                     xf_http_cancel(&http); handle_result(); processed = 1;
                     printf("\n  Initializing existing NIC driver (12s PHY watchdog).\n  DHCP negotiation will continue cooperatively afterwards.\n");
                     if (!xf_network_start(xf_monotonic_ms())) snprintf(result, sizeof(result), "Network start failed; inspect DHCP diagnostics.");
                 }
-                if (selected == 2) xenon_tone(440, 200, XENON_TONE_AMPLITUDE_25);
+                if (selected == 2) {
+                    if (xf_music_active(&music)) { xf_music_stop(&music, now); snprintf(result, sizeof(result), "Music stopping. Press A again after it stops for the diagnostic tone."); }
+                    else if (!xenon_sound_get_unplayed()) xenon_tone(440, 200, XENON_TONE_AMPLITUDE_25);
+                }
                 if (selected == 4 && !http.active) { if (!server_valid) begin_edit(1); else start_request(0, now); }
                 if (selected == 5 && !http.active) {
                     if (login_selected < 2) begin_edit(login_selected + 2);
                     else if (login_selected == 2) start_request(1, now);
                     else { logout(); xf_wipe(password, sizeof(password)); snprintf(result, sizeof(result), "Logged out; local token erased."); }
                 }
-                if (selected == 6) browse_request(browser.loaded ? XF_OPEN : XF_ROOT, now);
+                if (selected == 6) {
+                    if (play_selected(now)) selected = 7;
+                    else browse_request(browser.loaded ? XF_OPEN : XF_ROOT, now);
+                }
                 redraw = 1;
             }
         }
         /* Rate-limited diagnostics, not a continuously clearing/flickering console. */
-        if ((uint32_t)(now - last_draw) >= 500 && (selected == 1 || http.active)) redraw = 1;
-        if (redraw) { draw(selected); last_draw = now; redraw = 0; }
+        if ((uint32_t)(now - last_draw) >= 500 && (selected == 1 || selected == 7 || http.active)) redraw = 1;
+        if (redraw) { draw(selected); xf_music_tick(&music, xf_monotonic_ms(), xf_network_ready()); last_draw = now; redraw = 0; }
         previous = pad; udelay(10000);
     }
 }

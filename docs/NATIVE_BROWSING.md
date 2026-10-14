@@ -1,5 +1,7 @@
 # XeLL native library browsing 0.3
 
+**Subsequent hardware result:** the user has now confirmed 0.3 graphics/controller/audio diagnostics, Ethernet/HTTP/authentication, library discovery, movie pagination and metadata/details on Xbox 360. Pending-test wording below records the original 0.3 development stage. Version 0.4 extends these sources with music streaming/decoding; see [NATIVE_MUSIC.md](NATIVE_MUSIC.md). The direct 0.3 ELF is retained unchanged for rollback, while the diagnostic archive now packages 0.4.
+
 This adds browsing to the existing working 0.2 project. The user has confirmed 0.2 on a real Xbox 360 through XeLL: graphics/controller, audio, Ethernet, Jellyfin HTTP, username/password login, HTTP 200 and an access token held in RAM. Those results apply to 0.2. The 0.3 code cross-compiles and passes host tests against real Jellyfin; its new screens and requests still require Xbox testing.
 
 ## Download and test on Xbox
