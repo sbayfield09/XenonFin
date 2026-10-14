@@ -1,0 +1,8 @@
+build/
+dist/
+*.elf
+*.elf32
+*.map
+__pycache__/
+.env
+*.log
