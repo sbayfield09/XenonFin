@@ -1,14 +1,14 @@
 # Xbox 360 acceptance checklist
 
-**No entries below have been run on hardware.** Record console model, video cable/mode, XeLL version, exact source revision, toolchain image digest, server version, codec/profile/level/resolution/FPS/bitrate, wired network route and sample checksum with each result. The boot diagnostic currently supports only the initial platform checks. Client checks wait for the native integration described in PLATFORM.md.
+**User-reported baseline results:** XeLL launch, rendering, controller navigation, audio output, Ethernet initialization and link/IP display (`192.168.68.112`) work on a real console. Exact model/modes were not supplied. DHCP ACK/lease verification and the new HTTP/authentication build are still untested on that console; see [NATIVE_HTTP.md](NATIVE_HTTP.md). Record model, video cable/mode, XeLL version, exact source revision, toolchain digest, server version, wired route and sample checksum with each result.
 
 | Check | Expected behavior | Status |
 |---|---|---|
-| XeLL ELF launch on Fat / Slim / E | Each supported model boots a labeled native client | Unrun |
+| XeLL ELF launch on Fat / Slim / E | Each supported model boots a labeled native client | Baseline boot confirmed by user; new ELF/model matrix unrun |
 | 720p / 1080p output and safe area | Correct 16:9 display, readable text, no cropping | Unrun |
-| Controller, sticks, hold repeat, hotplug | Correct focus and controls without keyboard | Unrun |
-| Ethernet DHCP, link loss, reconnect | Bounded timeout and recoverable connection | Unrun |
-| Stereo 48 kHz little-endian PCM | Clean audio on HDMI/analog routes used | Unrun |
+| Controller, sticks, hold repeat, hotplug | Correct focus and controls without keyboard | Baseline navigation confirmed; new keyboard/repeat/hotplug unrun |
+| Ethernet DHCP, link loss, reconnect | Bounded timeout and recoverable connection | Baseline init/link/IP confirmed; actual DHCP ACK and new timeout/retry unrun |
+| Stereo 48 kHz little-endian PCM | Clean audio on HDMI/analog routes used | Baseline audio confirmed by user; route matrix unrun |
 | Initial server / hostname / base path | Saved valid URL and server information | Unrun |
 | Username/password / invalid credentials | Masked entry, safe errors, no secrets in logs | Unrun |
 | Valid token restart / expiry / logout | Session reuse and reauthentication | Unrun |

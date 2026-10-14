@@ -2,6 +2,8 @@
 
 Investigated 14 October 2026 using source checkouts, upstream build rules, and actual compilation. No physical Xbox 360 was connected to this environment.
 
+**Native 0.2 update:** the user has since verified the baseline ELF's XeLL launch, graphics, controller navigation, audio and Ethernet/link/IP display on a real console. The existing project now also implements native cooperative DHCP verification and HTTP public-info/authentication in C. See [NATIVE_HTTP.md](NATIVE_HTTP.md) for current controls, build, host-test evidence and the remaining console checks. The old displayed IP alone is not claimed as DHCP proof. No native video work is included in this stage.
+
 ## Verified open-source route
 
 [Free60 libXenon](https://github.com/Free60Project/libxenon/tree/c32c813c3d630ae922f83395ee4509b0468af71d) describes itself as a bare-metal library. Its `devkitxenon/rules` invokes `xenon-gcc`, links with `app.lds` and libXenon, then invokes `xenon-objcopy -O elf32-powerpc --adjust-vma 0x80000000`. The included examples use `xenos_init`, `console_init`, USB polling and `get_controller_data`. We used these actual APIs for `platform/xenon/main.c`, not invented SDK APIs.
@@ -14,7 +16,7 @@ The current upstream source-building script references mirrored GNU/newlib archi
 
 XeLL supplies a bare-metal ELF launch environment. Aurora/XeXMenu ordinarily launch XEX applications in the Xbox OS environment. XEX is a different container and execution environment, with imports, ABI and initialization requirements. Renaming an ELF or wrapping its bytes does not adapt libXenon's privileged bare-metal drivers to the dashboard environment.
 
-No working open-source-only XEX build/runtime/backend combination was established in this investigation. Microsoft's Xbox 360 SDK/XDK headers, libraries, platform services and decoder interfaces were not supplied, copied or downloaded. A future dashboard target needs a legally usable, verified toolchain/runtime and independently implemented platform backends. `default.xex` is not generated. The present native build is explicitly a **boot diagnostic**, not a Jellyfin client hidden behind an ELF extension.
+No working open-source-only XEX build/runtime/backend combination was established in this investigation. Microsoft's Xbox 360 SDK/XDK headers, libraries, platform services and decoder interfaces were not supplied, copied or downloaded. A future dashboard target needs a legally usable, verified toolchain/runtime and independently implemented platform backends. `default.xex` is not generated. The present native build supports connectivity/authentication and diagnostics; it is not the completed music/video client.
 
 ## Existing player evidence
 
@@ -34,8 +36,9 @@ Progress against the requested stages:
 
 | Stage | Result |
 |---|---|
-| 1: native boot/graphics/controller | Source and native ELF build complete; boot/display/controller/audio require hardware verification |
-| 2–3: console connection/auth/browse/search | Working and tested on desktop; not ported to libXenon |
+| 1: native boot/graphics/controller | Baseline boot, graphics, navigation, audio and Ethernet reported working by user; new build and model matrix still need hardware verification |
+| 2: console connection/auth | Native IPv4 HTTP, DHCP verification, keyboard and login implemented/cross-built; C protocol tested against real Jellyfin on host; console test pending |
+| 3: console browsing/search | Desktop implementation only; native integration remains |
 | 4: console music | Real desktop MP3/AAC/FLAC decode/output path; no console integration |
 | 5: console local video decoder | Desktop FFmpeg decoding tested; Xenon decoder integration absent |
 | 6: Jellyfin negotiation/stream/report | Desktop integration tested against real Jellyfin; native integration absent |
@@ -44,9 +47,9 @@ Progress against the requested stages:
 
 ## Work needed to finish the Xbox client
 
-1. Boot the diagnostic on supported Fat/Slim/E RGH/JTAG hardware, verify video mode, hotplug/repeat, Ethernet, PCM and loader return. Resolve any hardware-specific failures before expanding the target.
+1. Verify the updated HTTP/authentication build using NATIVE_HTTP.md. The user's baseline boot/platform results are retained; hotplug/repeat, exact display modes, model matrix and the new network adapters still require hardware checks. Do not advance native video until console connectivity/login work.
 2. Choose and prove a console media runtime: maintain an open-source bare-metal decoder/player port, or provide a legally usable dashboard runtime. Benchmark local clips before making network/player claims.
-3. Implement console HTTP/TLS transport, scheduling/thread primitives, filesystem configuration and platform-independent API bindings. Keep certificate and hostname verification; reject HTTPS explicitly until it is supported. The desktop `std::thread`/POSIX/SDL/FreeType stack is not assumed to cross-compile to libXenon.
+3. Extend the implemented native IPv4 HTTP/state-machine approach with authenticated library calls, persistence and a supported verified TLS backend as needed. HTTPS is currently rejected explicitly. The desktop `std::thread`/POSIX/SDL/FreeType stack is not assumed to cross-compile to libXenon.
 4. Integrate Xenos texture uploads/scaling, endian-correct PCM submission, queued-audio clock, seek/reset, decoder cleanup and controller UI. Validate each with local samples before Jellyfin streaming.
 5. Expose a native device profile containing only measured capabilities. Start with 480p and 720p H.264 Baseline/Main. If CPU decoding is insufficient, benchmark server-side lighter-codec alternatives such as MPEG-2 with the chosen decoder, including network bitrate and A/V timing. Do not advertise those paths before measuring them.
 6. Test actual server negotiation, transcoding/tone mapping, seek/reconnect/resume, and long-term memory stability. Complete the hardware checklist and record results. Only then describe the application as a native functioning Xbox client.

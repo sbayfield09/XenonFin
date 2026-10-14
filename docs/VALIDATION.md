@@ -1,5 +1,7 @@
 # Validation — 14 October 2026
 
+This page records the initial desktop/baseline validation. **For the subsequent native HTTP/authentication stage and user-confirmed baseline hardware results, see [NATIVE_HTTP.md](NATIVE_HTTP.md).** Its host protocol, callback, DHCP, TX/PHY guards and real-server login checks passed; the updated native ELF still awaits console testing. Earlier statements below about hardware checks refer to the original cloud validation, not a denial of the user's later test results.
+
 The runnable target verified here is the **Debian amd64 desktop client**. The Xbox artifact was cross-compiled and inspected, not booted. No XEX or Xbox playback benchmark exists.
 
 ## Completed checks

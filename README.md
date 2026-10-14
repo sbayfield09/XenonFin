@@ -1,8 +1,10 @@
 # XenonFin
 
-Jellyfin client development for Xbox 360. **The requested finished Xbox 360 client is not complete.** This repository delivers a functioning C++ desktop client and a separately cross-compiled libXenon boot diagnostic. There is no `default.xex`, and no Xbox playback or HD benchmark has been performed.
+Jellyfin client development for Xbox 360. **The requested finished Xbox 360 client is not complete.** The original XeLL/libXenon ELF now has user-confirmed boot, graphics, controller navigation, audio and Ethernet initialization on a real console. The updated native build adds DHCP lease verification, controller server/credential entry, real HTTP public-info and authentication requests. Those additions still need console testing. There is no `default.xex`, and no Xbox video/HD benchmark has been performed. A separate C++ desktop client is also included.
 
-The desktop program actually authenticates, browses and searches a Jellyfin server, negotiates playback, streams through a bounded HTTP buffer, demultiplexes and decodes with FFmpeg, presents video with SDL, queues stereo PCM, and reports playback to Jellyfin. Tests exercise a disposable real Jellyfin 10.10.7 server, including server-side HEVC-to-H.264 transcoding. The desktop backend is **not** an Xbox implementation.
+**Current native hardware-test download:** [xenonfin-xell-http.elf](dist/xenonfin-xell-http.elf). Copy it to USB as `xenon.elf` and follow [native connectivity/authentication instructions](docs/NATIVE_HTTP.md). The existing diagnostic functionality is retained. Native video development is paused until connectivity and authentication are verified on the console.
+
+The desktop program authenticates, browses and searches a Jellyfin server, negotiates playback, streams through a bounded HTTP buffer, demultiplexes and decodes with FFmpeg, presents video with SDL, queues stereo PCM, and reports playback to Jellyfin. Earlier desktop tests exercised a disposable real Jellyfin 10.10.7 server, including server-side HEVC-to-H.264 transcoding. The desktop backend is **not** the Xbox implementation; native HTTP is separate C code under `platform/xenon`.
 
 See [platform investigation and remaining work](docs/PLATFORM.md), [test evidence](docs/VALIDATION.md), [hardware checklist](docs/HARDWARE.md), and [troubleshooting](docs/TROUBLESHOOTING.md).
 
@@ -89,11 +91,11 @@ file build/xenon/xenonfin-boot.elf32
 
 The installer extracts the pinned official Free60 OCI image without a container daemon. Manifest and layer SHA-256 digests are checked before extraction. The pinned image contains Xenon GCC 16.2.0, libXenon, newlib and its upstream link rules. No Microsoft SDK files are used.
 
-For a console that already has working XeLL, copy `build/xenon/xenonfin-boot.elf32` to the root of a FAT32 USB device as `xenon.elf`, boot into XeLL using the console's existing setup, and let XeLL load that ELF. The diagnostic offers controller/display checks, Ethernet DHCP and a short PCM tone. B returns from `main`; the exact return behavior depends on the existing loader. **These launch instructions still require physical verification.** Do not flash a bootloader as part of this project. Aurora and XeXMenu do not directly launch this ELF; no dashboard chainloader is included.
+For a console that already has working XeLL, copy `build/xenon/xenonfin-boot.elf32` or `dist/xenonfin-xell-http.elf` to the root of a FAT32 USB device as `xenon.elf`, boot into XeLL using the existing setup, and let XeLL load it. The user verified this launch method with the baseline diagnostic; the updated HTTP/authentication build requires another hardware run. Controller/display checks, Ethernet diagnostics and the PCM tone remain, with server and login pages added. Read [NATIVE_HTTP.md](docs/NATIVE_HTTP.md) for DHCP checks, timeouts and controls. Do not flash a bootloader as part of this project. Aurora and XeXMenu do not directly launch this ELF; no dashboard chainloader is included.
 
 ## Packaging and project layout
 
-Download the checked-in archives and checksums from [dist/](dist/). The Xbox archive contains only the XeLL boot diagnostic, not a finished console client or XEX.
+Download the checked-in archives, direct native ELF and checksums from [dist/](dist/). The existing Xbox archive name is retained for download compatibility; it now contains the native connectivity/authentication build, not a finished media client or XEX.
 
 `bash scripts/package.sh` creates separate source, Linux desktop and Xbox **boot-diagnostic** archives under `dist/`, with checksums. Desktop runtime dependencies remain system packages. The source archive includes the original source, build scripts, documentation and tests, not account data, dependencies or credentials. There is no XEX conversion step.
 

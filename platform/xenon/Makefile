@@ -6,16 +6,19 @@ CC := $(DEVKITXENON)/bin/xenon-gcc
 OBJCOPY := $(DEVKITXENON)/bin/xenon-objcopy
 TARGET := ../../build/xenon/xenonfin-boot
 CFLAGS := -std=gnu99 -O2 -g -Wall -Wextra $(MACHDEP) -I$(LIBXENON_INC)
-LDFLAGS := $(MACHDEP) -Wl,--gc-sections -T $(LDSCRIPT) -L$(LIBXENON_LIB)
+LDFLAGS := $(MACHDEP) -Wl,--gc-sections -Wl,--wrap=mdelay -T $(LDSCRIPT) -L$(LIBXENON_LIB)
 .PHONY: all clean
 all: $(TARGET).elf32
-$(TARGET).o: main.c
+SOURCES := main.c protocol.c json.c http.c tcp_client.c native_net.c driver_guard.c init_guard.c
+OBJECTS := $(patsubst %.c,../../build/xenon/%.o,$(SOURCES))
+../../build/xenon/%.o: %.c
 	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-$(TARGET).elf: $(TARGET).o
-	$(CC) $< $(LDFLAGS) -lxenon -lm -o $@
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+$(TARGET).elf: $(OBJECTS) Makefile
+	$(CC) $(OBJECTS) $(LDFLAGS) -lxenon -lm -o $@
 $(TARGET).elf32: $(TARGET).elf
 	$(OBJCOPY) -O elf32-powerpc --adjust-vma 0x80000000 $< $@
 	$(DEVKITXENON)/bin/xenon-strip $@
 clean:
-	rm -f $(TARGET).o $(TARGET).elf $(TARGET).elf32
+	rm -f $(OBJECTS) $(OBJECTS:.o=.d) $(TARGET).elf $(TARGET).elf32
+-include $(OBJECTS:.o=.d)

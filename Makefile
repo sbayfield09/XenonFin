@@ -13,7 +13,7 @@ CORE = src/network.cpp src/settings.cpp src/jellyfin.cpp src/keyboard.cpp
 PLAYER = src/playback.cpp src/images.cpp
 APP = src/main.cpp src/ui.cpp src/graphics.cpp src/input.cpp
 OBJ = $(patsubst %.cpp,build/%.o,$(CORE) $(PLAYER) $(APP))
-.PHONY: all test integration sanitize xenon clean
+.PHONY: all test integration sanitize native-test xenon clean
 all: build/xenonfin build/core-tests build/ui-tests
 build/xenonfin: $(OBJ)
 	$(CXX) $(CXXFLAGS) $^ $(LDLIBS) -o $@
@@ -35,6 +35,8 @@ sanitize: build/sanitized-tests
 	ASAN_OPTIONS=detect_leaks=1 ./build/sanitized-tests
 xenon:
 	$(MAKE) -C platform/xenon
+native-test:
+	$(MAKE) -C platform/xenon/tests all test
 clean:
 	rm -rf build
 -include $(wildcard build/src/*.d build/tests/*.d)

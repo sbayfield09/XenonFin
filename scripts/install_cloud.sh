@@ -32,4 +32,5 @@ python3 "$project_dir/scripts/fetch_devkit.py" "$setup_dir/devkit"
 python3 "$project_dir/scripts/fetch_test_server.py" "$setup_dir/jellyfin-server"
 make -C "$project_dir" -j3 DEPS_ROOT="$setup_dir/sysroot" all
 make -C "$project_dir" DEVKITXENON="$setup_dir/devkit" xenon
+make -C "$project_dir/platform/xenon/tests" DEVKITXENON="$setup_dir/devkit" all test
 make -C "$project_dir" DEPS_ROOT="$setup_dir/sysroot" test

@@ -1,5 +1,7 @@
 # Troubleshooting
 
+For the native XeLL HTTP/authentication build, start with [NATIVE_HTTP.md](NATIVE_HTTP.md). DHCP must show a verified ACK lease; a nonzero IP alone is insufficient. Use the server's LAN IPv4 and port, not the Xbox's own address. A PHY watchdog timeout requires a reboot before retry; an HTTP timeout/cancel can be retried from the UI. The user-confirmed baseline graphics/controller/audio/Ethernet functionality remains in this build.
+
 - **No XEX / Aurora cannot launch the file:** the native artifact is a bare-metal diagnostic ELF for an existing XeLL setup. There is no completed dashboard client. Read PLATFORM.md.
 - **Cloud cannot reach a private address:** `192.168.68.202` is a LAN address. A cloud task needs an actual route, such as a platform-managed VPN, as well as any applicable network allowlist. Changing the allowlist alone does not create that route. Do not install a separate VPN client as a workaround.
 - **Public hostname returns a proxy 403:** review the domain in environment network settings and save/apply the configuration. The observed cloud CONNECT rejection does not prove that the Jellyfin server itself rejects authentication. The repository does not hardcode or modify your server.
