@@ -261,12 +261,12 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.4.1 - XeLL / MP3 music streaming\n");
+    printf("\n  XENONFIN 0.4.2 - XeLL / MP3 music streaming\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < 8; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
     if (selected < 6) printf("\n  LB/RB: sections  D-pad: navigate  A: select  B: back\n");
-    if (selected == 0) printf("\n  Graphics initialized; controller input is polled.\n  Hardware boot, rendering, navigation and audio confirmed by user.\n");
+    if (selected == 0) printf("\n  Graphics initialized; controller input is polled.\n  Hardware boot, rendering, navigation and audio confirmed by user.\n  Text: changed regions; GPU flip wait disabled.\n");
     if (selected == 1) draw_network();
     if (selected == 2) printf("\n  A: existing 440 Hz stereo PCM diagnostic.\n  During music, A stops it first; press A again after it stops.\n");
     if (selected == 3) printf("\n  XeLL ELF; no XEX conversion.\n  Native raw lwIP TCP: no socket or DNS layer, no TLS.\n  HTTP connect/idle timeout 8s; total request timeout 20s.\n  DHCP and HTTP continue while navigating/typing.\n  Server/username/token are RAM-only; password wiped on submit.\n  Video decoding is not part of this build.\n");
@@ -399,7 +399,7 @@ int main(void) {
                 redraw = 1;
             }
         }
-        /* Presentation only polls a fence: no retrace wait, decoding or HTTP here.
+        /* Presentation never waits on GPU acknowledgement, decoding or HTTP.
          * Dirty controller/data events persist while a flip is pending. Only
          * visible statistics get timer updates, at most four per second. */
         xf_console_poll(now);

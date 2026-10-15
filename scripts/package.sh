@@ -14,7 +14,7 @@ cp build/xenon/xenonfin-boot.elf32 dist/xenonfin-xell-music-fix.elf
 chmod 644 dist/xenonfin-xell-music-fix.elf
 cp docs/PLATFORM.md docs/HARDWARE.md docs/THIRD_PARTY.md docs/NATIVE_HTTP.md docs/NATIVE_BROWSING.md docs/NATIVE_MUSIC.md docs/NATIVE_RENDERING.md docs/LIBXENON_CONSOLE_LICENSE.md LICENSE "$stage_dir/xbox-boot-diagnostic/"
 cp platform/xenon/third_party/minimp3/LICENSE "$stage_dir/xbox-boot-diagnostic/MINIMP3-LICENSE.txt"
-printf '%s\n' 'XenonFin 0.4.1: complete-frame text presentation and 4 Hz playback statistics. Actual 0.4 MP3 playback confirmed on Xbox by user; new presentation requires console testing. No XEX or video playback. See NATIVE_RENDERING.md and NATIVE_MUSIC.md.' > "$stage_dir/xbox-boot-diagnostic/README.txt"
+printf '%s\n' 'XenonFin 0.4.2: frozen-menu recovery; original framebuffer with changed-region presentation and 4 Hz statistics. GPU swap-acknowledgement dependency removed. Actual 0.4 MP3 playback confirmed on Xbox by user; new presentation requires console testing. No XEX or video playback. See NATIVE_RENDERING.md and NATIVE_MUSIC.md.' > "$stage_dir/xbox-boot-diagnostic/README.txt"
 cp build/xenonfin "$stage_dir/linux-x86_64/"
 strip --strip-unneeded "$stage_dir/linux-x86_64/xenonfin"
 cp README.md LICENSE "$stage_dir/linux-x86_64/"

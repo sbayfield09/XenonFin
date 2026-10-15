@@ -25,29 +25,34 @@
 // hacked to fit into libxenon by Felix Domke <tmbinc@elitedvb.net>
 // This is a bit ugly, and it's not Georg's fault.
 
-/* Off-screen scanout adapter: pinned console font, tiling, colors and overscan. */
+/* Compatibility presenter: complete CPU-side surfaces, changed cache-line
+ * copies to the original libXenon framebuffer. No GPU flips or retrace fence:
+ * 0.4.1's unverified acknowledgement could permanently suppress menu redraws. */
 #include "framebuffer.h"
 #include <xenos/xenos.h>
 #include <ppc/cache.h>
 #include <stdint.h>
+#include <string.h>
 extern const unsigned char fontdata_8x16[4096];
 extern uint32_t xenos_read32(int);
-extern void xenos_write32(int, uint32_t);
-/* AVIVO scanout registers/bits: r500_reg.h and the existing Xenos display block. */
-#define XF_FRAME_COUNT 0x60a4
-#define XF_SURFACE_PENDING (1U << 2)
-#define XF_H_RETRACE (1U << 0)
 #define XF_SURFACE_BYTES (8U * 1024U * 1024U)
+#define XF_CACHE_LINE 128U
 static uint32_t pixels[2][XF_SURFACE_BYTES / 4] __attribute__((aligned(65536)));
 static unsigned width, height, pitch, padded_height, origin_x, origin_y;
-static uint32_t boot_address, old_flip_control, queued_frame;
-static int initialized;
-static uint32_t physical(unsigned buffer) { return (uint32_t)((uintptr_t)pixels[buffer] & 0x1fffffffU); }
+static unsigned char *display;
+static int presented = -1;
 static void barrier(void) {
 #ifdef XENON
     __asm__ volatile("sync" ::: "memory");
 #endif
 }
+/* Same cached mapping as console_init(). Kept as a seam for hosted tests. */
+#ifndef XF_FRAMEBUFFER_HOST_TEST
+static void *map_display(uint32_t address) { return (void *)(uintptr_t)(address | 0x80000000U); }
+#else
+extern void *xf_test_map_display(uint32_t);
+#define map_display xf_test_map_display
+#endif
 static void clear(void *context, unsigned buffer, uint32_t color) {
     unsigned i; (void)context;
     for (i = 0; i < pitch * padded_height; ++i) pixels[buffer][i] = color;
@@ -63,42 +68,49 @@ static void glyph(void *context, unsigned buffer, unsigned column, unsigned row,
     }
 }
 static void flush(void *context, unsigned buffer) {
-    (void)context; memdcbst(pixels[buffer], (int)(pitch * padded_height * 4)); barrier();
+    /* Sources are CPU-only cached memory; never scanned by the GPU. The copy
+     * below flushes only completed destination regions, after their writes. */
+    (void)context; (void)buffer;
 }
 static int flip(void *context, unsigned buffer) {
+    const unsigned char *source = (const unsigned char *)pixels[buffer];
+    unsigned size = pitch * padded_height * 4, offset;
     (void)context;
-    if (xenos_read32(D1GRPH_UPDATE) & XF_SURFACE_PENDING) return 0;
-    /* Bit 0 selects horizontal/immediate flips in the old mode setup. Clear
-     * it for vertical-retrace updates; don't wait/spin for a narrow vblank. */
-    xenos_write32(D1GRPH_FLIP_CONTROL, old_flip_control & ~XF_H_RETRACE);
-    xenos_write32(D1GRPH_PRIMARY_SURFACE_ADDRESS, physical(buffer));
-    barrier(); (void)xenos_read32(D1GRPH_PRIMARY_SURFACE_ADDRESS);
-    /* Snapshot AFTER the posted write: a retrace between the address write
-     * and readback must not count as our future completion fence. Holding
-     * the old front for an extra retrace is safe and never blocks the CPU. */
-    queued_frame = xenos_read32(XF_FRAME_COUNT); return 1;
+    if (presented < 0) {
+        /* Initial background plus text, in one copy, with no erase-only pass. */
+        memcpy(display, source, size); memdcbst(display, (int)size);
+    } else {
+        const unsigned char *previous = (const unsigned char *)pixels[presented];
+        for (offset = 0; offset < size; offset += XF_CACHE_LINE) {
+            if (memcmp(source + offset, previous + offset, XF_CACHE_LINE)) {
+                /* Write finished glyph pixels directly, including spaces that
+                 * erase shortened values. Unchanged text is never touched. */
+                memcpy(display + offset, source + offset, XF_CACHE_LINE);
+                memdcbst(display + offset, XF_CACHE_LINE);
+            }
+        }
+    }
+    barrier(); presented = (int)buffer; return 1;
 }
 static int complete(void *context, unsigned buffer) {
     (void)context;
-    if (xenos_read32(D1GRPH_PRIMARY_SURFACE_ADDRESS) != physical(buffer)) return -1;
-    if ((xenos_read32(D1GRPH_UPDATE) & XF_SURFACE_PENDING) || xenos_read32(XF_FRAME_COUNT) == queued_frame) return 0;
-    /* A retrace occurred AND the surface update finished. Old front is free. */
-    return 1;
+    /* Presentation finished synchronously, without a display-register wait. */
+    return presented == (int)buffer ? 1 : -1;
 }
 int xf_framebuffer_init(xf_console_backend *backend, unsigned *columns, unsigned *rows) {
+    uint32_t address;
     width = xenos_read32(D1GRPH_X_END); height = xenos_read32(D1GRPH_Y_END); pitch = xenos_read32(D1GRPH_PITCH);
     if (!width || width > 1920 || height < 32 || height > 1080 || pitch != ((width + 31) & ~31U)) return 0;
     padded_height = (height + 31) & ~31U;
     if ((uint64_t)pitch * padded_height * 4 > XF_SURFACE_BYTES) return 0;
+    address = xenos_read32(D1GRPH_PRIMARY_SURFACE_ADDRESS);
+    if (address & (XF_CACHE_LINE - 1)) return 0;
+    display = map_display(address);
+    if (!display) return 0;
     origin_x = origin_y = 0;
     if (xenos_is_overscan()) { origin_x = width / 28; origin_y = height / 28; }
     *columns = (width - 2 * origin_x) / 8; *rows = (height - 2 * origin_y) / 16;
-    boot_address = xenos_read32(D1GRPH_PRIMARY_SURFACE_ADDRESS); old_flip_control = xenos_read32(D1GRPH_FLIP_CONTROL);
     backend->clear = clear; backend->glyph = glyph; backend->flush = flush; backend->flip = flip; backend->complete = complete; backend->context = 0;
-    initialized = 1; return 1;
+    presented = -1; return 1;
 }
-void xf_framebuffer_shutdown(void) {
-    if (!initialized) return;
-    xenos_write32(D1GRPH_FLIP_CONTROL, old_flip_control);
-    xenos_write32(D1GRPH_PRIMARY_SURFACE_ADDRESS, boot_address); barrier(); initialized = 0;
-}
+void xf_framebuffer_shutdown(void) { /* Original video mode/address never changed. */ }

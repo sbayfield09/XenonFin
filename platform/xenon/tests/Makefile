@@ -52,8 +52,8 @@ test: $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests 
 
 $(OUT)/render-tests: render_tests.c ../console_frame.c ../console_frame.h ../ui_clock.c ../ui_clock.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) render_tests.c ../console_frame.c ../ui_clock.c -o $@
-$(OUT)/framebuffer-tests: framebuffer_tests.c ../framebuffer.c ../framebuffer.h ../console_frame.h | $(OUT)
-	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include framebuffer_tests.c ../framebuffer.c -o $@
+$(OUT)/framebuffer-tests: framebuffer_tests.c ../framebuffer.c ../framebuffer.h ../console_frame.c ../console_frame.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -DXF_FRAMEBUFFER_HOST_TEST -I$(DEVKITXENON)/usr/include framebuffer_tests.c ../framebuffer.c ../console_frame.c -o $@
 
 $(OUT)/console-adapter-tests: console_adapter_tests.c ../console_batch.c ../console_frame.c ../console_batch.h ../console_frame.h ../framebuffer.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include console_adapter_tests.c ../console_batch.c ../console_frame.c -o $@

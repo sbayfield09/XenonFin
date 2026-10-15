@@ -28,16 +28,16 @@ int xf_framebuffer_init(xf_console_backend *backend, unsigned *columns, unsigned
 }
 void xf_framebuffer_shutdown(void) { ++shutdowns; }
 int main(void) {
-    CHECK(xf_console_init()); CHECK(stdout_hook==boot && xf_console_ready());
-    xf_console_begin(); CHECK(stdout_hook!=boot); stdout_hook("Title: ",7); xf_console_putch('A');
+    CHECK(xf_console_init()); CHECK(stdout_hook==NULL && xf_console_ready());
+    xf_console_begin(); CHECK(stdout_hook!=NULL); stdout_hook("Title: ",7); xf_console_putch('A');
     CHECK(xf_console_cursor_y()==1); stdout_hook("Track",5); xf_console_end();
-    CHECK(stdout_hook==boot && !xf_console_ready()); CHECK(!memcmp(cells[pending],"Title: ATrack",13));
-    stdout_hook("background driver log",21); CHECK(boot_writes==1);
+    CHECK(stdout_hook==NULL && !xf_console_ready()); CHECK(!memcmp(cells[pending],"Title: ATrack",13));
+    CHECK(stdout_hook==NULL && boot_writes==0); /* vfs logs serial-only between UI frames. */
     xf_console_poll(++now); CHECK(xf_console_ready());
     xf_console_begin(); stdout_hook("Title: B\nTrack",14); xf_console_end();
     CHECK(front==0 && !memcmp(cells[front],"Title: ATrack",13));
     xf_console_poll(++now); CHECK(front==1 && !memcmp(cells[front],"Title: B        Track",21));
     xf_console_shutdown(); CHECK(shutdowns==1 && stdout_hook==boot);
-    printf("Native stdout capture, direct glyph ordering and boot-console isolation: %u assertions passed\n",checks);
+    printf("Native stdout capture, direct glyph ordering and live-console isolation: %u assertions passed\n",checks);
     return 0;
 }

@@ -19,7 +19,11 @@ int xf_console_init(void) {
     if (columns != old_columns || rows != old_rows || !xf_console_frame_init(&frame, columns, rows, &backend)) return 0;
     /* printf fragments and direct glyph calls must retain their order. */
     setvbuf(stdout, NULL, _IONBF, 0);
-    boot_hook = stdout_hook; return 1;
+    boot_hook = stdout_hook;
+    /* The boot console now IS the displayed surface. Outside UI capture,
+     * leave serial logging to vfs_console_write without letting its console
+     * hook scribble over text whose cached cells are otherwise unchanged. */
+    stdout_hook = NULL; return 1;
 }
 int xf_console_ready(void) { return xf_console_frame_ready(&frame); }
 void xf_console_poll(uint32_t now) { xf_console_frame_poll(&frame, now); }
@@ -30,7 +34,7 @@ void xf_console_begin(void) {
 void xf_console_putch(unsigned char c) { xf_console_frame_putch(&frame, c, console_color[0], console_color[1]); }
 int xf_console_cursor_y(void) { return (int)frame.y; }
 void xf_console_end(void) {
-    fflush(stdout); stdout_hook = boot_hook;
+    fflush(stdout); stdout_hook = NULL;
     xf_console_frame_end(&frame, xf_monotonic_ms());
 }
 void xf_console_shutdown(void) { stdout_hook = boot_hook; xf_framebuffer_shutdown(); }

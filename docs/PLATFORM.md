@@ -2,7 +2,7 @@
 
 Investigated 14 October 2026 using source checkouts, upstream build rules, and actual compilation. No physical Xbox 360 was connected to this environment.
 
-**Native 0.4 update (15 October 2026):** the user has confirmed 0.3 XeLL boot, graphics/controller/audio diagnostics, Ethernet/HTTP/authentication, library discovery, movie pagination and metadata/details on a real console. Version 0.4 extends that code with native MP3 streaming, scalar decoding, PCM conversion/output, controls and Jellyfin reports. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md). The user has since confirmed audible MP3 playback on console in 0.4, with text-only flicker. Version 0.4.1 fixes the presentation path; [NATIVE_RENDERING.md](NATIVE_RENDERING.md) documents its pending console checks. No native artwork or video decoder was added.
+**Native 0.4 update (15 October 2026):** the user has confirmed 0.3 XeLL boot, graphics/controller/audio diagnostics, Ethernet/HTTP/authentication, library discovery, movie pagination and metadata/details on a real console. Version 0.4 extends that code with native MP3 streaming, scalar decoding, PCM conversion/output, controls and Jellyfin reports. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md). The user has since confirmed audible MP3 playback on console in 0.4, with text-only flicker. The 0.4.1 presentation fix froze menu updates while B still exited. Version 0.4.2 removes the hardware swap dependency; [NATIVE_RENDERING.md](NATIVE_RENDERING.md) documents its pending console checks. No native artwork or video decoder was added.
 
 ## Verified open-source route
 
@@ -39,7 +39,7 @@ Progress against the requested stages:
 | 1: native boot/graphics/controller | Version 0.3 confirmed on hardware by user; broader model/output matrix unrun |
 | 2: console connection/auth | Native DHCP/HTTP/keyboard/login working on console in 0.3 |
 | 3: console browsing/search | Native discovery/movie paging/metadata confirmed in 0.3; TV/music hierarchy API tested; native search absent |
-| 4: console music | 0.4 native MP3 streaming/decoding/PCM conversion/output implemented and host-tested; actual MP3 output confirmed by user; 0.4.1 presentation needs console testing |
+| 4: console music | 0.4 native MP3 streaming/decoding/PCM conversion/output implemented and host-tested; actual MP3 output confirmed by user; 0.4.2 presentation needs console testing |
 | 5: console local video decoder | Desktop FFmpeg decoding tested; Xenon video integration absent |
 | 6: Jellyfin negotiation/stream/report | Native 0.4 music negotiation, direct/transcoded MP3 and reports pass real Jellyfin host integration; audible 0.4 MP3 output confirmed; broader reporting/control matrix pending |
 | 7: optimize/HD | Desktop synthetic 720p tests only; no Xbox video resolution/FPS claim |
@@ -47,8 +47,8 @@ Progress against the requested stages:
 
 ## Work needed to finish the Xbox client
 
-1. Validate [0.4.1 text presentation](NATIVE_RENDERING.md) during playback on the console. The user's working 0.3 browsing and audible 0.4 MP3 playback remain established.
-2. Measure sustained MP3 decode/output, mono/stereo resampling, UI responsiveness, queued-audio clock, pause/stop/skip, cable-loss recovery and long-run memory behavior on the console. Validate complete-frame buffer switching at the user's display mode.
+1. Validate [0.4.2 text presentation](NATIVE_RENDERING.md) during playback on the console. The user's working 0.3 browsing and audible 0.4 MP3 playback remain established.
+2. Measure sustained MP3 decode/output, mono/stereo resampling, UI responsiveness, queued-audio clock, pause/stop/skip, cable-loss recovery and long-run memory behavior on the console. Validate changed-region framebuffer presentation at the user's display mode.
 3. Keep native video and artwork deferred during this text-rendering fix. A later video effort still needs a maintained bare-metal decoder/player integration and real local-clip benchmarks before streaming claims.
 4. Persistence and a verified TLS backend remain future work as needed. HTTPS is rejected explicitly; the desktop POSIX/SDL/FFmpeg stack is not assumed to cross-compile to libXenon.
 5. For a future native video decoder, integrate Xenos presentation, seek/reset and A/V synchronization, then advertise only measured capabilities in a separate device profile. The current native profile advertises MP3 audio only.

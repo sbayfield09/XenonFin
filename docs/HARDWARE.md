@@ -1,6 +1,6 @@
 # Xbox 360 acceptance checklist
 
-**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. 0.4.1 fixes text-only flicker; its complete-frame presentation needs [console regression testing](NATIVE_RENDERING.md). See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
+**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. 0.4.2 removes the GPU swap dependency that froze menus in 0.4.1; its changed-region presentation needs [console regression testing](NATIVE_RENDERING.md). See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
 
 | Check | Expected behavior | Status |
 |---|---|---|
