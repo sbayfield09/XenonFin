@@ -11,7 +11,7 @@ COMMON_HEADERS := ../protocol.h ../browse.h
 MUSIC := ../audio_decode.c ../music_api.c
 MUSIC_HEADERS := ../audio_decode.h ../music_api.h ../third_party/minimp3/minimp3.h
 .PHONY: all test
-all: $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-probe $(OUT)/music-protocol-tests $(OUT)/decode-probe $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests $(OUT)/probe
+all: $(OUT)/video-source-tests $(OUT)/video-native-tests $(OUT)/video-tests $(OUT)/video-probe $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-probe $(OUT)/music-protocol-tests $(OUT)/decode-probe $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests $(OUT)/probe
 $(OUT):
 	mkdir -p $@
 $(OUT)/music-protocol-tests: music_protocol_tests.c $(COMMON) $(MUSIC) ../text.c $(COMMON_HEADERS) $(MUSIC_HEADERS) | $(OUT)
@@ -36,7 +36,10 @@ $(OUT)/network-tests: network_tests.c ../native_net.c $(COMMON) ../native_net.h 
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include network_tests.c ../native_net.c $(COMMON) -o $@
 $(OUT)/init-tests: init_tests.c ../init_guard.c ../driver_guard.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include init_tests.c ../init_guard.c -o $@
-test: $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-protocol-tests $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests
+test: $(OUT)/video-source-tests $(OUT)/video-native-tests $(OUT)/video-tests $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-protocol-tests $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests
+	$(OUT)/video-source-tests
+	$(OUT)/video-native-tests
+	$(OUT)/video-tests
 	$(OUT)/console-adapter-tests
 	$(OUT)/render-tests
 	$(OUT)/framebuffer-tests
@@ -57,3 +60,15 @@ $(OUT)/framebuffer-tests: framebuffer_tests.c ../framebuffer.c ../framebuffer.h 
 
 $(OUT)/console-adapter-tests: console_adapter_tests.c ../console_batch.c ../console_frame.c ../console_batch.h ../console_frame.h ../framebuffer.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include console_adapter_tests.c ../console_batch.c ../console_frame.c -o $@
+
+$(OUT)/video-probe: video_probe.c ../video_decode.c ../video_decode.h ../third_party/pl_mpeg/pl_mpeg.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) video_probe.c ../video_decode.c -lm -o $@
+
+$(OUT)/video-tests: video_tests.c ../video.c ../video_pixels.c ../video.h ../video_decode.h ../video_pixels.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) video_tests.c ../video.c ../video_pixels.c -o $@
+
+$(OUT)/video-native-tests: video_native_tests.c ../video_native.c ../video_pixels.c ../video_native.h ../video_pixels.h ../video.h ../video_decode.h ../third_party/xmplayer_yuv_shaders.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include video_native_tests.c ../video_native.c ../video_pixels.c -o $@
+
+$(OUT)/video-source-tests: video_source_tests.c ../video_source.c ../video_native.h ../video.h ../video_decode.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include video_source_tests.c ../video_source.c -o $@

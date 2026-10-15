@@ -40,3 +40,10 @@ native-test:
 clean:
 	rm -rf build
 -include $(wildcard build/src/*.d build/tests/*.d)
+
+.PHONY: video-test-file native-video-test
+video-test-file: build/video-fixtures/xenonfin-test.m1v
+build/video-fixtures/xenonfin-test.m1v: scripts/make_video_test.sh
+	bash scripts/make_video_test.sh $@
+native-video-test: native-test
+	python3 tests/native_video.py

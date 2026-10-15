@@ -1,6 +1,6 @@
 # Xbox 360 acceptance checklist
 
-**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. 0.4.2 removes the GPU swap dependency that froze menus in 0.4.1; its changed-region presentation needs [console regression testing](NATIVE_RENDERING.md). See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
+**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. The user has since confirmed the text flicker fix. Version 0.5 adds the silent local MPEG-1 test; [physical video validation](NATIVE_VIDEO.md) is pending. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
 
 | Check | Expected behavior | Status |
 |---|---|---|
@@ -29,3 +29,7 @@
 | Two-hour playback / repeated stop / library churn | No leaks, memory exhaustion or gradual drift | Unrun |
 
 For each codec/resolution, record decoded/presented FPS, dropped/late frames, audio underruns, average/maximum video-to-audio clock error, startup and rebuffer durations, compressed-buffer occupancy, CPU utilization, peak/steady memory and network throughput. Include at least ten minutes of motion/detail-heavy material and a two-hour stability run for the chosen supported mode. Dummy audio timing on a cloud machine is not a hardware A/V measurement. A 1080p display mode does not establish 1080p decoding.
+
+## Version 0.5 local video acceptance
+
+Follow [NATIVE_VIDEO.md](NATIVE_VIDEO.md): FAT USB load, actual moving decoded pattern, correct aspect/colors, CPU/GPU performance counters, pause/resume, stop/return and subsequent music/library regression. All video hardware results are pending; source/build/host tests do not replace them.

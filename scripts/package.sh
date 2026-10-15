@@ -4,17 +4,22 @@ project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$project_dir"
 test -x build/xenonfin
 test -f build/xenon/xenonfin-boot.elf32
+test -f build/video-fixtures/xenonfin-test.m1v
 mkdir -p dist/stage
 stage_dir=$(mktemp -d "$project_dir/dist/stage/package.XXXXXXXX")
 trap 'rm -rf -- "$stage_dir"' EXIT
 mkdir -p "$stage_dir/source" "$stage_dir/linux-x86_64" "$stage_dir/xbox-boot-diagnostic"
-cp -a Makefile README.md LICENSE .gitignore src include platform scripts tests docs "$stage_dir/source/"
+cp -a Makefile README.md LICENSE .gitignore .gitattributes src include platform scripts tests docs "$stage_dir/source/"
 cp build/xenon/xenonfin-boot.elf32 "$stage_dir/xbox-boot-diagnostic/xenon.elf"
-cp build/xenon/xenonfin-boot.elf32 dist/xenonfin-xell-music-fix.elf
-chmod 644 dist/xenonfin-xell-music-fix.elf
-cp docs/PLATFORM.md docs/HARDWARE.md docs/THIRD_PARTY.md docs/NATIVE_HTTP.md docs/NATIVE_BROWSING.md docs/NATIVE_MUSIC.md docs/NATIVE_RENDERING.md docs/LIBXENON_CONSOLE_LICENSE.md LICENSE "$stage_dir/xbox-boot-diagnostic/"
+cp build/xenon/xenonfin-boot.elf32 dist/xenonfin-xell-video.elf
+chmod 644 dist/xenonfin-xell-video.elf
+cp build/video-fixtures/xenonfin-test.m1v dist/xenonfin-test.m1v
+cp build/video-fixtures/xenonfin-test.m1v "$stage_dir/xbox-boot-diagnostic/xenonfin-test.m1v"
+cp docs/PLATFORM.md docs/HARDWARE.md docs/THIRD_PARTY.md docs/NATIVE_HTTP.md docs/NATIVE_BROWSING.md docs/NATIVE_MUSIC.md docs/NATIVE_RENDERING.md docs/NATIVE_VIDEO.md docs/LIBXENON_CONSOLE_LICENSE.md docs/LIBFAT_LICENSE.md LICENSE "$stage_dir/xbox-boot-diagnostic/"
+cp platform/xenon/third_party/pl_mpeg/LICENSE "$stage_dir/xbox-boot-diagnostic/PL-MPEG-LICENSE.txt"
+cp platform/xenon/third_party/pl_mpeg/SOURCE.md "$stage_dir/xbox-boot-diagnostic/PL-MPEG-SOURCE.md"
 cp platform/xenon/third_party/minimp3/LICENSE "$stage_dir/xbox-boot-diagnostic/MINIMP3-LICENSE.txt"
-printf '%s\n' 'XenonFin 0.4.2: frozen-menu recovery; original framebuffer with changed-region presentation and 4 Hz statistics. GPU swap-acknowledgement dependency removed. Actual 0.4 MP3 playback confirmed on Xbox by user; new presentation requires console testing. No XEX or video playback. See NATIVE_RENDERING.md and NATIVE_MUSIC.md.' > "$stage_dir/xbox-boot-diagnostic/README.txt"
+printf '%s\n' 'XenonFin 0.5: silent local MPEG-1 video hardware test. Copy xenon.elf and xenonfin-test.m1v to FAT USB root. Local video test: A CPU reference, Y optional Xenos texture test. Source builds and host decoding pass; visible video/USB/GPU behavior on Xbox remains unverified. Working 0.4 music/text sources preserved. See NATIVE_VIDEO.md.' > "$stage_dir/xbox-boot-diagnostic/README.txt"
 cp build/xenonfin "$stage_dir/linux-x86_64/"
 strip --strip-unneeded "$stage_dir/linux-x86_64/xenonfin"
 cp README.md LICENSE "$stage_dir/linux-x86_64/"
@@ -24,5 +29,5 @@ for target in source linux-x86_64 xbox-boot-diagnostic; do
     tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --exclude=__pycache__ \
         -czf "dist/xenonfin-$target.tar.gz" -C "$stage_dir" "$target"
 done
-(cd dist && sha256sum xenonfin-*.tar.gz xenonfin-*.elf > SHA256SUMS)
+(cd dist && sha256sum xenonfin-*.tar.gz xenonfin-*.elf xenonfin-*.m1v > SHA256SUMS)
 printf '%s\n' 'Created source, Linux desktop, and Xbox boot diagnostic archives in dist/.'

@@ -1,5 +1,7 @@
 # XenonFin 0.4.2 menu recovery and text presentation
 
+The user has now confirmed the previous text flicker issue is fixed; version 0.5 preserves this text path while adding a reserved video region. The following records the rendering investigation and 0.4.2 recovery.
+
 The user confirmed actual 0.4 MP3 playback on Xbox 360 through XeLL: music works, the blue background is stable, and white text flickers. This change preserves the audio decoder/output, raw lwIP HTTP, Jellyfin APIs and controller operations. New presentation must be validated on that hardware.
 
 ## Cause established from source

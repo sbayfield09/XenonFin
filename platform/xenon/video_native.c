@@ -1,0 +1,142 @@
+/* GPU conversion follows the GPL XMPlayer Y/U/V texture + RECTLIST path.
+ * It resolves ONLY into a private tiled surface. Neither renderer changes
+ * scanout or the working UI presentation; CPU copies completed tile bands. */
+#include "video_native.h"
+#include "video_pixels.h"
+#include "framebuffer.h"
+#include <xenos/xe.h>
+#include <xenos/edram.h>
+#include <ppc/cache.h>
+#include <stdio.h>
+#include <string.h>
+#include "third_party/xmplayer_yuv_shaders.h"
+extern uint64_t xf_monotonic_us(void);
+extern void Xe_pStep(struct XenosDevice *, int);
+extern void Xe_pBlockUntilIdle(struct XenosDevice *);
+static struct {
+    int gpu, initialized, pending, failed;
+    unsigned x,y,w,h,footer,token;
+    uint64_t submitted;
+    xf_video_rect rect;
+    struct XenosDevice device;
+    struct XenosShader *pixel,*vertex;
+    struct XenosSurface *plane[3],*target;
+    struct XenosVertexBuffer *vertices;
+    unsigned video_width,video_height;
+} native;
+static uint32_t cpu_pixels[640*384] __attribute__((aligned(128)));
+static uint64_t clock_us(void *context) { (void)context; return xf_monotonic_us(); }
+static int error(char *text, size_t size, const char *message) { snprintf(text,size,"%s",message); return 0; }
+static int gpu_done(void) {
+    volatile uint32_t *written=(volatile uint32_t *)((uintptr_t)native.device.rb+0x10100U);
+    memdcbf((void *)written,128); return *written==native.token;
+}
+static int begin(void *context, const xf_video_info *info, char *text, size_t size) {
+    (void)context;
+    if(!xf_framebuffer_video_area(&native.x,&native.y,&native.w,&native.h,&native.footer)) return error(text,size,"Display too small for video plus diagnostics.");
+    native.rect=xf_video_fit(info,native.w,native.h);
+    if(!native.gpu) return 1;
+    if(native.failed) return error(text,size,"GPU test previously timed out. Use CPU mode, or reboot before retrying GPU.");
+    if(native.pending && !gpu_done()) return error(text,size,"Previous GPU work is still pending. CPU mode remains available.");
+    native.pending=0;
+    if(!native.initialized) {
+        struct XenosVBFFormat format={2,{{XE_USAGE_POSITION,0,XE_TYPE_FLOAT4},{XE_USAGE_TEXCOORD,0,XE_TYPE_FLOAT2}}};
+        /* Opt-in only. Upstream Xe_Init/edram_init contain hardware waits and
+         * fatal allocation paths: see NATIVE_VIDEO.md before the GPU test. */
+        Xe_Init(&native.device); edram_init(&native.device);
+        native.pixel=Xe_LoadShaderFromMemory(&native.device,(void *)ps);
+        Xe_InstantiateShader(&native.device,native.pixel,0);
+        native.vertex=Xe_LoadShaderFromMemory(&native.device,(void *)vs);
+        Xe_InstantiateShader(&native.device,native.vertex,0);
+        Xe_ShaderApplyVFetchPatches(&native.device,native.vertex,0,&format);
+        native.vertices=Xe_CreateVertexBuffer(&native.device,4096);
+        native.initialized=1;
+    }
+    if(!native.target || native.target->width!=(int)native.w || native.target->height!=(int)native.h) {
+        if(native.target) Xe_DestroyTexture(&native.device,native.target);
+        native.target=Xe_CreateTexture(&native.device,native.w,native.h,1,XE_FMT_8888|XE_FMT_BGRA,1);
+        memset(native.target->base,0,native.target->wpitch*native.target->hpitch);
+        memdcbst(native.target->base,native.target->wpitch*native.target->hpitch);
+    }
+    if(native.video_width!=info->width || native.video_height!=info->height) {
+        unsigned i;
+        for(i=0;i<3;++i) {
+            unsigned divisor=i?2:1;
+            if(native.plane[i]) Xe_DestroyTexture(&native.device,native.plane[i]);
+            native.plane[i]=Xe_CreateTexture(&native.device,info->width/divisor,info->height/divisor,1,XE_FMT_8,0);
+            native.plane[i]->u_addressing=native.plane[i]->v_addressing=XE_TEXADDR_CLAMP;
+            memset(native.plane[i]->base,i?128:16,native.plane[i]->wpitch*native.plane[i]->hpitch);
+        }
+        native.video_width=info->width; native.video_height=info->height;
+    }
+    Xe_SetRenderTarget(&native.device,native.target);
+    return 1;
+}
+static int submit(void *context, const xf_video_image *image, char *text, size_t size) {
+    (void)context;
+    if(!native.gpu) {
+        xf_video_pixels(cpu_pixels,native.w,native.h,image,&native.rect);
+        return xf_framebuffer_video_copy(cpu_pixels,native.x,native.y,native.w,native.h) || error(text,size,"Video tile copy bounds error.");
+    } else {
+        const unsigned char *planes[]={image->y,image->cb,image->cr}; unsigned i,row;
+        struct vertex { float x,y,z,w,u,v; } vertices[3];
+        float left=2.0f*native.rect.x/native.w-1.0f, right=2.0f*(native.rect.x+native.rect.width)/native.w-1.0f;
+        float top=1.0f-2.0f*native.rect.y/native.h, bottom=1.0f-2.0f*(native.rect.y+native.rect.height)/native.h;
+        vertices[0]=(struct vertex){left,top,0,1,0,0}; vertices[1]=(struct vertex){left,bottom,0,1,0,1}; vertices[2]=(struct vertex){right,top,0,1,1,0};
+        for(i=0;i<3;++i) {
+            unsigned w=image->width/(i?2:1), h=image->height/(i?2:1), stride=i?image->c_stride:image->y_stride;
+            unsigned char *data=Xe_Surface_LockRect(&native.device,native.plane[i],0,0,0,0,XE_LOCK_WRITE);
+            for(row=0;row<h;++row) memcpy(data+row*native.plane[i]->wpitch,planes[i]+row*stride,w);
+            Xe_Surface_Unlock(&native.device,native.plane[i]);
+        }
+        memcpy(Xe_VB_Lock(&native.device,native.vertices,0,sizeof(vertices),XE_LOCK_WRITE),vertices,sizeof(vertices));
+        Xe_VB_Unlock(&native.device,native.vertices);
+        Xe_InvalidateState(&native.device); Xe_SetRenderTarget(&native.device,native.target);
+        Xe_SetClearColor(&native.device,0xff000000); Xe_Clear(&native.device,XE_CLEAR_COLOR);
+        Xe_SetZEnable(&native.device,0); Xe_SetZWrite(&native.device,0); Xe_SetCullMode(&native.device,XE_CULL_NONE);
+        Xe_SetAlphaTestEnable(&native.device,0); Xe_SetSrcBlend(&native.device,XE_BLEND_ONE); Xe_SetDestBlend(&native.device,XE_BLEND_ZERO);
+        Xe_SetShader(&native.device,SHADER_TYPE_PIXEL,native.pixel,0); Xe_SetShader(&native.device,SHADER_TYPE_VERTEX,native.vertex,0);
+        for(i=0;i<3;++i) Xe_SetTexture(&native.device,i,native.plane[i]);
+        Xe_SetStreamSource(&native.device,0,native.vertices,0,sizeof(struct vertex)/4);
+        Xe_DrawPrimitive(&native.device,XE_PRIMTYPE_RECTLIST,0,1);
+        Xe_Resolve(&native.device); Xe_pBlockUntilIdle(&native.device);
+        if(!++native.token) ++native.token;
+        /* Never accept a stale value from a reused writeback allocation as
+         * completion of this command stream. This cache line is reserved for
+         * the scratch register (the ring read pointer is a different line). */
+        {
+            uint32_t *written=(uint32_t *)((uintptr_t)native.device.rb+0x10100U);
+            *written=~native.token; memdcbst(written,128);
+#ifdef XENON
+            __asm__ volatile("sync" ::: "memory");
+#else
+            __asm__ volatile("" ::: "memory");
+#endif
+        }
+        Xe_pStep(&native.device,(int)native.token); Xe_Execute(&native.device);
+        native.pending=1; native.submitted=xf_monotonic_us(); return 1;
+    }
+}
+static int poll(void *context, char *text, size_t size) {
+    (void)context;
+    if(!native.gpu) return 1;
+    if(!gpu_done()) {
+        if(xf_monotonic_us()-native.submitted<250000) return 0;
+        native.failed=1; error(text,size,"GPU completion timeout. Private surfaces retained; CPU mode remains available."); return -1;
+    }
+    native.pending=0;
+    memdcbf(native.target->base,native.target->wpitch*native.target->hpitch);
+    if(!xf_framebuffer_video_copy(native.target->base,native.x,native.y,native.w,native.h)) { error(text,size,"GPU tile copy bounds error."); return -1; }
+    Xe_VBReclaim(&native.device); return 1;
+}
+static void end(void *context) {
+    (void)context;
+    /* An abandoned GPU render can only touch private surfaces. Keep bounded
+     * allocations alive; never free memory still referenced by the GPU. */
+    xf_framebuffer_invalidate();
+}
+void xf_video_native_backend(xf_video_backend *backend, int gpu) {
+    native.gpu=gpu;
+    backend->begin=begin; backend->submit=submit; backend->poll=poll; backend->end=end; backend->microseconds=clock_us; backend->context=NULL;
+    backend->format=gpu?"Xenos Y/U/V textures -> tiled BGRA":"CPU YUV420 -> tiled BGRA";
+}

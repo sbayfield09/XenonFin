@@ -80,6 +80,21 @@ int main(void) {
     capture(' ',26000); CHECK(view[tile(64,0)]==0x11223344 && view[tile(71,0)]==0x11223344);
     CHECK(view[tile(0,0)]==0xffeeeeee); /* Static title survives changed/erased statistics. */
     CHECK(reads==8); /* Init reads only, however long playback/navigation runs. */
+    {
+        static uint32_t video_tiles[640*384]; unsigned vx,vy,vw,vh,footer,j;
+        CHECK(xf_framebuffer_video_area(&vx,&vy,&vw,&vh,&footer));
+        CHECK(vw==640 && vh==384 && vy==128 && footer==33);
+        for(j=0;j<vw*vh;++j) video_tiles[j]=0xff224466;
+        CHECK(xf_framebuffer_video_copy(video_tiles,vx,vy,vw,vh));
+        CHECK(view[tile(vx,vy)]==0xff224466 && view[tile(0,0)]==0xffeeeeee);
+        capture(' ',27000); CHECK(view[tile(vx,vy)]==0xff224466); /* Identical overlay. */
+        capture('B',27250); CHECK(view[tile(vx,vy)]==0xff224466); /* Changed stats don't erase video. */
+        xf_framebuffer_invalidate(); capture('A',27500);
+        CHECK(view[tile(vx,vy)]==0x11223344); /* Stop/page change restores UI. */
+        CHECK(!xf_framebuffer_video_copy(NULL,vx,vy,vw,vh));
+        CHECK(!xf_framebuffer_video_copy(video_tiles,vx+1,vy,vw,vh));
+        CHECK(!xf_framebuffer_video_copy(video_tiles,vx,vy,4096,vh));
+    }
     overscan=1; CHECK(xf_framebuffer_init(&backend,&columns,&rows));
     CHECK(columns==(1280-2*(1280/28))/8 && rows==(720-2*(720/28))/16);
     backend.clear(NULL,0,cell.background); cell.character='A'; backend.glyph(NULL,0,0,0,&cell);
@@ -89,6 +104,16 @@ int main(void) {
     backend.clear(NULL,1,0); backend.glyph(NULL,1,239,66,&cell); before=bytes_flushed;
     CHECK(backend.flip(NULL,1)); CHECK(bytes_flushed-before==1920*1088*4);
     CHECK(view[tile(239*8,66*16)]==cell.foreground);
+    {
+        const unsigned sizes[][2]={{640,400},{640,480},{720,576},{1280,720},{1920,1080}};
+        unsigned mode,scan,vx,vy,vw,vh,footer;
+        for(mode=0;mode<5;++mode) for(scan=0;scan<2;++scan) {
+            width=sizes[mode][0];height=sizes[mode][1];pitch=(width+31)&~31U;overscan=(int)scan;
+            CHECK(xf_framebuffer_init(&backend,&columns,&rows));
+            CHECK(xf_framebuffer_video_area(&vx,&vy,&vw,&vh,&footer));
+            CHECK(footer+4<rows && !((vx|vy|vw|vh)&31) && vx+vw<=width && vy+vh<=height);
+        }
+    }
     pitch=1; CHECK(!xf_framebuffer_init(&backend,&columns,&rows));
     pitch=width=4096; CHECK(!xf_framebuffer_init(&backend,&columns,&rows));
     printf("Native compatibility presentation, changed pixels and unavailable GPU fence: %u assertions passed\n",checks);

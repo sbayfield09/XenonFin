@@ -59,3 +59,7 @@ The alternate `192.168.68.202:8096` address requires a real LAN/VPN route from t
 - Installation/startup instructions are saved in the environment draft. Saving them does not publish a snapshot. Review/save and publication remain product actions; a fresh task restore has not been tested.
 
 The requested native Xbox 360 definition of done is **not satisfied**. PLATFORM.md describes the substantive native integration and hardware work required next.
+
+## Native 0.5 video host evidence
+
+The user confirmed stable text rendering and the established MP3/network/Jellyfin features. Native MPEG-1 decoding, scalar color conversion, a two-frame scheduler, local FAT USB source adapter and Xenos texture/private-target integration now cross-compile using the same toolchain. Player/source/renderer/framebuffer regression suites pass normally and with ASan/UBSan. Real compressed video produces 240/240, 48/48 and 60/60 frames matching FFmpeg within the documented pixel tolerances. Existing real Jellyfin music integration still passes. See [NATIVE_VIDEO.md](NATIVE_VIDEO.md). USB, GPU execution, visible motion and native performance remain untested on physical Xbox hardware in this environment.

@@ -1,0 +1,3 @@
+# Preserve upstream header/array bytes, including whitespace, for pinned hashes.
+platform/xenon/third_party/pl_mpeg/pl_mpeg.h whitespace=-blank-at-eol
+platform/xenon/third_party/xmplayer_yuv_shaders.h whitespace=-blank-at-eol

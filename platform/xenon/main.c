@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include <console/console.h>
 #include <input/input.h>
 #include <usb/usbmain.h>
@@ -19,14 +20,18 @@
 #include "text.h"
 #include "console_batch.h"
 #include "ui_clock.h"
+#include "video_native.h"
+#include "framebuffer.h"
 
 static const char *sections[] = {
     "Graphics / controller", "Network / DHCP diagnostics", "Audio output",
-    "Platform status", "Jellyfin server", "Jellyfin login", "Libraries", "Now playing"
+    "Platform status", "Jellyfin server", "Jellyfin login", "Libraries", "Now playing", "Local video test"
 };
 static xf_http_client http;
 static xf_browser browser;
+enum { SECTION_COUNT = sizeof(sections)/sizeof(*sections) };
 static xf_music music;
+static xf_video video;
 static unsigned text_width = 72;
 enum { REQUEST_PUBLIC, REQUEST_LOGIN, REQUEST_BROWSE };
 static int request_kind;
@@ -39,16 +44,16 @@ static int server_valid, server_verified, authenticated, processed = 1;
 static int editing, edit_field, login_selected, show_body;
 static void handle_result(void);
 /* Each time check uses elapsed subtraction, including uint32 millisecond wrap. */
-uint32_t xf_monotonic_ms(void) {
+uint64_t xf_monotonic_us(void) {
     uint32_t high, low, check;
-    /* Stable read across the lower timebase register's ~86-second rollover. */
     do {
         asm volatile ("mftbu %0" : "=r" (high));
         asm volatile ("mftbl %0" : "=r" (low));
         asm volatile ("mftbu %0" : "=r" (check));
     } while (high != check);
-    return (uint32_t)((((uint64_t)high << 32) | low) / (PPC_TIMEBASE_FREQ / 1000));
+    return (((uint64_t)high << 32) | low) / (PPC_TIMEBASE_FREQ / 1000000);
 }
+uint32_t xf_monotonic_ms(void) { return (uint32_t)(xf_monotonic_us()/1000); }
 static void logout(void) {
     xf_music_forget(&music);
     authenticated = 0; xf_wipe(token, sizeof(token)); xf_wipe(user_id, sizeof(user_id)); xf_wipe(user_name, sizeof(user_name));
@@ -255,21 +260,51 @@ static void draw_network(void) {
     }
     printf("  A: initialise/retry DHCP. There is no automatic static-IP fallback.\n");
 }
+static void start_video(int gpu) {
+    char path[128]; xf_video_backend backend;
+    if(xf_music_active(&music) || xenon_sound_get_unplayed()) {
+        snprintf(video.message,sizeof(video.message),"Stop music on Now playing first; local video test has no audio."); return;
+    }
+    if(http.active) { snprintf(video.message,sizeof(video.message),"Wait for the current HTTP request before mounting USB."); return; }
+    if(!xf_video_local_path(path,sizeof(path),video.message,sizeof(video.message))) return;
+    xf_video_native_backend(&backend,gpu); xf_video_start(&video,path,&backend);
+}
+static void video_line(const char *format, ...) {
+    char text[256], cell[128]; va_list arguments;
+    va_start(arguments,format); vsnprintf(text,sizeof(text),format,arguments); va_end(arguments);
+    xf_text_cell(cell,sizeof(cell),text,text_width); printf("  %s\n",cell);
+}
+static void draw_video(void) {
+    unsigned x,y,w,h,footer;
+    video_line("A: CPU/play-pause  Y: GPU  Start: pause  X: stop  B: Libraries");
+    video_line("%s | %ux%u | source %.3f FPS | %s",video.codec->name,video.info.width,video.info.height,video.info.fps,
+        video.paused?"PAUSED":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED");
+    video_line("%s",video.message);
+    if(video.state==XF_VIDEO_LOADING) video_line("File: %u / %u bytes (maximum 8 MiB)",(unsigned)video.loaded,(unsigned)video.size);
+    if(!xf_framebuffer_video_area(&x,&y,&w,&h,&footer)) { printf("  Display too small for video canvas plus diagnostics.\n"); return; }
+    while((unsigned)xf_console_cursor_y()<footer) printf("\n");
+    video_line("FPS %u.%03u | decoded %u | shown %u | drop %u",video.fps_milli/1000,video.fps_milli%1000,video.decoded,video.rendered,video.dropped);
+    video_line("Decode avg %.2f/max %.2f ms | present avg %.2f ms",video.decoded?(double)video.decode_us/video.decoded/1000:0,(double)video.max_decode_us/1000,
+        video.rendered?(double)video.render_us/video.rendered/1000:0);
+    video_line("%s",video.backend.format?video.backend.format:"CPU or Xenos planar Y/U/V -> tiled BGRA");
+    video_line("Queue %u/%u (peak %u), pending %u | clock %lu.%03lu s",video.count,XF_VIDEO_QUEUE,video.max_occupancy,video.pending,
+        (unsigned long)(video.timeline_us/1000000),(unsigned long)((video.timeline_us/1000)%1000));
+}
 static void draw(int selected) {
     int i;
     unsigned width;
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.4.2 - XeLL / MP3 music streaming\n");
+    printf("\n  XENONFIN 0.5 - XeLL / local video test\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
-    else for (i = 0; i < 8; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
+    else for (i = 0; i < SECTION_COUNT; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
     if (selected < 6) printf("\n  LB/RB: sections  D-pad: navigate  A: select  B: back\n");
     if (selected == 0) printf("\n  Graphics initialized; controller input is polled.\n  Hardware boot, rendering, navigation and audio confirmed by user.\n  Text: changed regions; GPU flip wait disabled.\n");
     if (selected == 1) draw_network();
     if (selected == 2) printf("\n  A: existing 440 Hz stereo PCM diagnostic.\n  During music, A stops it first; press A again after it stops.\n");
-    if (selected == 3) printf("\n  XeLL ELF; no XEX conversion.\n  Native raw lwIP TCP: no socket or DNS layer, no TLS.\n  HTTP connect/idle timeout 8s; total request timeout 20s.\n  DHCP and HTTP continue while navigating/typing.\n  Server/username/token are RAM-only; password wiped on submit.\n  Video decoding is not part of this build.\n");
+    if (selected == 3) printf("\n  XeLL ELF; no XEX conversion.\n  Native raw lwIP TCP: no socket or DNS layer, no TLS.\n  HTTP connect/idle timeout 8s; total request timeout 20s.\n  DHCP and HTTP continue while navigating/typing.\n  Server/username/token are RAM-only; password wiped on submit.\n  Local silent MPEG-1 test: select Local video test.\n");
     if (selected == 4) {
         printf("\n  Server: "); safe_print(address[0] ? address : "not set", XF_TEXT_LIMIT);
         printf("\n  A: GET /System/Info/Public   Y: edit IP/port   X: body/name\n  HTTP is plaintext: use only your trusted LAN.\n");
@@ -293,6 +328,7 @@ static void draw(int selected) {
     }
     if (selected == 6) draw_browser();
     if (selected == 7) draw_player();
+    if (selected == 8) draw_video();
     if (selected == 4 || selected == 5 || selected == 6 || http.active) {
         wrapped(result, 0, 3);
         if (http.active) printf("  %s  Sent %u/%u bytes  Received %u bytes\n", http.connected ? "Waiting for HTTP" : "Connecting TCP", (unsigned)http.queued, (unsigned)http.request_size, (unsigned)http.received_size);
@@ -311,7 +347,7 @@ int main(void) {
     xf_ui_clock ui_clock = {0, 0};
     xf_audio_backend audio = { audio_queued, audio_free, audio_submit, NULL };
     memset(&previous, 0, sizeof(previous)); xf_http_init(&http); xf_browser_init(&browser);
-    xf_music_init(&music, &audio);
+    xf_music_init(&music, &audio); xf_video_init(&video,&xf_mpeg1_codec);
     /* Preserve the hardware-tested initialization order. */
     xenos_init(VIDEO_MODE_AUTO); console_init(); usb_init(); xenon_sound_init();
     if (!xf_console_init()) { printf("Unsupported framebuffer geometry; text compositor not started.\n"); return 1; }
@@ -319,6 +355,7 @@ int main(void) {
         uint32_t now = xf_monotonic_ms(); char direction = 0, move = 0;
         xf_network_tick(now); xf_http_tick(&http, now, xf_network_ready());
         xf_music_tick(&music, now, xf_network_ready());
+        xf_video_tick(&video,now);
         if (music.session_expired) {
             xf_http_cancel(&http); processed = 1; logout(); snprintf(result, sizeof(result), "HTTP 401: music session expired. Sign in again."); redraw = 1;
         }
@@ -339,8 +376,8 @@ int main(void) {
             if (pad.b && !previous.b) { xf_wipe(&keyboard, sizeof(keyboard)); editing = 0; redraw = 1; }
         } else {
             int old_selected = selected;
-            if (pad.rb && !previous.rb) { selected = (selected + 1) % 8; redraw = 1; }
-            if (pad.lb && !previous.lb) { selected = (selected + 7) % 8; redraw = 1; }
+            if (pad.rb && !previous.rb) { selected = (selected + 1) % SECTION_COUNT; redraw = 1; }
+            if (pad.lb && !previous.lb) { selected = (selected + SECTION_COUNT - 1) % SECTION_COUNT; redraw = 1; }
             if (pad.back && !previous.back) { selected = 7; redraw = 1; }
             if (move == 'U' || move == 'D') {
                 if (selected == 5) login_selected = (login_selected + (move == 'D' ? 1 : 3)) % 4;
@@ -348,7 +385,7 @@ int main(void) {
                     if (browser.details) { if (move == 'D') ++browser.detail_scroll; else if (browser.detail_scroll) --browser.detail_scroll; }
                     else xf_browser_move(&browser, move == 'D' ? 1 : -1);
                 }
-                else if (selected != 7) selected = (selected + (move == 'D' ? 1 : 7)) % 8;
+                else if (selected != 7 && selected != 8) selected = (selected + (move == 'D' ? 1 : SECTION_COUNT-1)) % SECTION_COUNT;
                 redraw = 1;
             }
             if (old_selected != 6 && selected == 6 && !browser.loaded && authenticated) browse_request(XF_ROOT, now);
@@ -362,7 +399,8 @@ int main(void) {
                 }
                 else if (selected == 5) selected = 4;
                 else if (selected == 7) selected = 6;
-                else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); xf_console_shutdown(); return 0; }
+                else if (selected == 8) { xf_video_stop(&video); selected=6; }
+                else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); xf_video_stop(&video); xf_console_shutdown(); return 0; }
                 redraw = 1;
             }
             if (pad.y && !previous.y && selected == 4) { begin_edit(1); redraw = 1; }
@@ -376,7 +414,13 @@ int main(void) {
                 if (pad.x && !previous.x) { xf_music_stop(&music, now); redraw = 1; }
                 if ((pad.start && !previous.start) || (pad.a && !previous.a)) { xf_music_pause(&music); redraw = 1; }
             }
+            if(selected==8) {
+                if(pad.x && !previous.x) { xf_video_stop(&video); redraw=1; }
+                if(pad.start && !previous.start) { xf_video_pause(&video,now); redraw=1; }
+                if(pad.y && !previous.y && !xf_video_active(&video)) { start_video(1); redraw=1; }
+            }
             if (pad.a && !previous.a) {
+                if(selected==8) { if(xf_video_active(&video)) xf_video_pause(&video,now); else start_video(0); }
                 if (selected == 1) {
                     xf_http_cancel(&http); handle_result(); processed = 1;
                     printf("\n  Initializing existing NIC driver (12s PHY watchdog).\n  DHCP negotiation will continue cooperatively afterwards.\n");
@@ -399,12 +443,13 @@ int main(void) {
                 redraw = 1;
             }
         }
+        if(selected!=8 && (video.backend_started || video.state==XF_VIDEO_LOADING)) { xf_video_stop(&video); redraw=1; }
         /* Presentation never waits on GPU acknowledgement, decoding or HTTP.
          * Dirty controller/data events persist while a flip is pending. Only
          * visible statistics get timer updates, at most four per second. */
         xf_console_poll(now);
         if (xf_console_ready() && xf_ui_due(&ui_clock, now, redraw,
-                !editing && (selected == 1 || selected == 7 || http.active))) {
+                !editing && (selected == 1 || selected == 7 || selected == 8 || http.active))) {
             draw(selected); xf_ui_rendered(&ui_clock, now); redraw = 0;
         }
         previous = pad; udelay(10000);

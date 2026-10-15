@@ -4,6 +4,8 @@ The user confirmed **0.3** on a real Xbox 360 through XeLL: graphics/controller,
 
 **The user has now confirmed actual MP3 music playback works on Xbox 360 in 0.4.** The reported issue was flickering white text over a stable blue background. The initial 0.4.1 presentation fix froze menu updates while B still exited. Version 0.4.2 removes its GPU swap dependency and copies only changed pixel regions; see [NATIVE_RENDERING.md](NATIVE_RENDERING.md) for the diagnosis and required console regression checks. No physical console is attached to this development environment. Broader format/control tests below remain useful regression checks.
 
+Version 0.5 preserves these music sources and adds only a separate silent local MPEG-1 test. See [NATIVE_VIDEO.md](NATIVE_VIDEO.md) for its ELF and instructions. The user has now confirmed the text-flicker fix; the 0.4.2 download below is retained as stable rollback.
+
 ## Download and console test
 
 Download [xenonfin-xell-music-fix.elf](../dist/xenonfin-xell-music-fix.elf), verify it against `dist/SHA256SUMS`, rename it **xenon.elf**, and boot from your FAT32 USB using the working XeLL method. The existing diagnostic archive now contains 0.4.2 and these instructions. Keep the unchanged [0.4 music build](../dist/xenonfin-xell-music.elf) and [0.3](../dist/xenonfin-xell-browse.elf) for rollback; their bytes are unchanged.

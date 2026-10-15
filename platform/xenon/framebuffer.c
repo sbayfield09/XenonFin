@@ -114,3 +114,31 @@ int xf_framebuffer_init(xf_console_backend *backend, unsigned *columns, unsigned
     presented = -1; return 1;
 }
 void xf_framebuffer_shutdown(void) { /* Original video mode/address never changed. */ }
+
+void xf_framebuffer_invalidate(void) { presented=-1; }
+int xf_framebuffer_video_area(unsigned *x, unsigned *y, unsigned *w, unsigned *h, unsigned *text_row) {
+    unsigned available, rows=(height-2*origin_y)/16;
+    if(!display || width<640 || height<400 || width<2*origin_x+96) return 0;
+    *y=(origin_y+112+31)&~31U;
+    if(height<=origin_y+*y+96) return 0;
+    available=(width-2*origin_x-64)&~31U; *w=available>640?640:available;
+    available=(height-origin_y-*y-96)&~31U; *h=available>384?384:available;
+    if(*w<32 || *h<32) return 0;
+    *x=((width-*w)/2)&~31U;
+    *text_row=(*y+*h-origin_y+15)/16+1;
+    /* Four diagnostic lines plus their final newline must not trigger the
+     * console's two-row scroll in short/overscanned display modes. */
+    while(*h>=32 && *text_row+4>=rows) { *h-=32; *text_row=(*y+*h-origin_y+15)/16+1; }
+    return *h>=32;
+}
+int xf_framebuffer_video_copy(const void *tiled, unsigned x, unsigned y, unsigned w, unsigned h) {
+    const unsigned char *source=tiled; unsigned row;
+    if(!display || !tiled || !w || !h || ((x|y|w|h)&31) || x>width || w>width-x || y>height || h>height-y) return 0;
+    /* A complete 32-row tile band is contiguous. Copy finished tile bands,
+     * never issue per-pixel writes to the scanned framebuffer. */
+    for(row=0;row<h;row+=32) {
+        unsigned char *destination=display+(((y+row)*pitch+x*32)*4);
+        memcpy(destination,source+row*w*4,w*32*4); memdcbst(destination,(int)(w*32*4));
+    }
+    barrier(); return 1;
+}
