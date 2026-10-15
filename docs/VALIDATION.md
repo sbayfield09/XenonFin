@@ -60,6 +60,12 @@ The alternate `192.168.68.202:8096` address requires a real LAN/VPN route from t
 
 The requested native Xbox 360 definition of done is **not satisfied**. PLATFORM.md describes the substantive native integration and hardware work required next.
 
-## Native 0.5 video host evidence
+## Original native 0.5 host evidence (before console testing)
 
 The user confirmed stable text rendering and the established MP3/network/Jellyfin features. Native MPEG-1 decoding, scalar color conversion, a two-frame scheduler, local FAT USB source adapter and Xenos texture/private-target integration now cross-compile using the same toolchain. Player/source/renderer/framebuffer regression suites pass normally and with ASan/UBSan. Real compressed video produces 240/240, 48/48 and 60/60 frames matching FFmpeg within the documented pixel tolerances. Existing real Jellyfin music integration still passes. See [NATIVE_VIDEO.md](NATIVE_VIDEO.md). USB, GPU execution, visible motion and native performance remain untested on physical Xbox hardware in this environment.
+
+## Native 0.5.1 colour and timing evidence
+
+The user confirms 0.5 MPEG-1 decode and both renderers on Xbox, with wrong CPU colours and dropped frames. 0.5.1 follows the pinned libXenon big-endian B,G,R,X framebuffer byte ABI and has independent known-colour tests: compressed patches through the real decoder/tiled converter differ from FFmpeg RGB by mean 0.487/255 and maximum 3/255. Actual 320×240/30, 640×360/30 and 720×480/30 fixtures decode completely with unchanged strict YUV tolerances. The 720×480 final macroblock exposed and now covers a fixed-memory EOF lookahead bug.
+
+A prepared-frame scheduler model including the reported 3.3 ms decode cost, render/copy costs and 4 Hz UI stalls displays all 240 frames without drops at the expected duration. Stage metrics separate conversion, upload, commands, completion bounds/poll uncertainty, copy, UI and cooperative waiting; VSync waits are disabled. Normal/sanitized native suites and real Jellyfin login/browse/music integration pass. **No 0.5.1 physical colour, frame-rate or CPU-utilisation measurements have been made in this environment.** See [NATIVE_VIDEO.md](NATIVE_VIDEO.md) for the pending hardware matrix.

@@ -47,3 +47,7 @@ build/video-fixtures/xenonfin-test.m1v: scripts/make_video_test.sh
 	bash scripts/make_video_test.sh $@
 native-video-test: native-test
 	python3 tests/native_video.py
+
+.PHONY: video-benchmarks
+video-benchmarks:
+	bash scripts/make_video_benchmarks.sh

@@ -1758,7 +1758,15 @@ int plm_buffer_has_start_code(plm_buffer_t *self, int code) {
 
 int plm_buffer_peek_non_zero(plm_buffer_t *self, int bit_count) {
 	if (!plm_buffer_has(self, bit_count)) {
-		return FALSE;
+		/* XenonFin: a complete final macroblock may need fewer than the
+		 * 23 lookahead bits used by decode_slice. At fixed-source EOF,
+		 * inspect the remaining bits instead of silently skipping it.
+		 * Never read past length or change streaming buffer semantics. */
+		size_t remaining = (self->length << 3) - self->bit_index;
+		if (!self->has_ended || self->mode != PLM_BUFFER_MODE_FIXED_MEM || !remaining) {
+			return FALSE;
+		}
+		bit_count = (int)remaining;
 	}
 
 	int val = plm_buffer_read(self, bit_count);

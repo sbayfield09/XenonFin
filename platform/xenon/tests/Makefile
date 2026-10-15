@@ -61,8 +61,8 @@ $(OUT)/framebuffer-tests: framebuffer_tests.c ../framebuffer.c ../framebuffer.h 
 $(OUT)/console-adapter-tests: console_adapter_tests.c ../console_batch.c ../console_frame.c ../console_batch.h ../console_frame.h ../framebuffer.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include console_adapter_tests.c ../console_batch.c ../console_frame.c -o $@
 
-$(OUT)/video-probe: video_probe.c ../video_decode.c ../video_decode.h ../third_party/pl_mpeg/pl_mpeg.h | $(OUT)
-	$(HOST_CC) $(CFLAGS) video_probe.c ../video_decode.c -lm -o $@
+$(OUT)/video-probe: video_probe.c ../video_decode.c ../video_pixels.c ../video_pixels.h ../video_decode.h ../third_party/pl_mpeg/pl_mpeg.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) video_probe.c ../video_decode.c ../video_pixels.c -lm -o $@
 
 $(OUT)/video-tests: video_tests.c ../video.c ../video_pixels.c ../video.h ../video_decode.h ../video_pixels.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) video_tests.c ../video.c ../video_pixels.c -o $@

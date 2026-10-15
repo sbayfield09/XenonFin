@@ -2,15 +2,22 @@
 #define XF_VIDEO_H
 #include "video_decode.h"
 #include <stdio.h>
-#define XF_VIDEO_QUEUE 2U
+#define XF_VIDEO_QUEUE 4U
+/* GPU time is a fence observation upper bound; poll uncertainty is explicit. */
+typedef struct {
+    uint64_t conversion_us, upload_us, commands_us, gpu_observed_us, gpu_poll_gap_us, copy_us;
+    unsigned prepared, gpu_completed, presented;
+} xf_video_render_stats;
 typedef struct {
     int (*begin)(void *, const xf_video_info *, char *, size_t);
     int (*submit)(void *, const xf_video_image *, char *, size_t);
-    int (*poll)(void *, char *, size_t); /* 0 pending, 1 copied/presented, -1 error */
+    int (*poll)(void *, char *, size_t); /* 0 preparing, 1 ready in PRIVATE memory, -1 error */
     void (*end)(void *);
     uint64_t (*microseconds)(void *);
     const char *format;
     void *context;
+    int (*present)(void *, char *, size_t); /* publish a ready picture only */
+    const xf_video_render_stats *stats;
 } xf_video_backend;
 enum xf_video_state { XF_VIDEO_IDLE, XF_VIDEO_LOADING, XF_VIDEO_PLAYING, XF_VIDEO_ENDED, XF_VIDEO_ERROR };
 typedef struct { unsigned char data[XF_VIDEO_FRAME_BYTES]; uint64_t pts; } xf_video_slot;
@@ -23,14 +30,18 @@ typedef struct {
     unsigned char *bytes;
     size_t size, loaded;
     unsigned head, count, decoded, rendered, dropped, max_occupancy, fps_milli;
-    uint64_t timeline_us, decode_us, max_decode_us, render_us, submitted_at;
-    uint32_t last_ms, fps_at, fps_frames;
-    unsigned paused, clock_started, eof, pending, backend_started;
+    uint64_t timeline_us, decode_us, max_decode_us;
+    uint64_t last_clock_us, pending_pts, queue_copy_us, ui_us, wait_us, loop_us;
+    unsigned ui_frames, loop_count, starved, synthetic;
+    uint32_t fps_at, fps_frames;
+    unsigned paused, clock_started, eof, pending, ready, backend_started;
     enum xf_video_state state;
     char path[128], message[180];
 } xf_video;
 void xf_video_init(xf_video *, const xf_video_codec *);
 int xf_video_start(xf_video *, const char *path, const xf_video_backend *);
+int xf_video_start_colours(xf_video *, const xf_video_backend *);
+unsigned xf_video_wait_us(const xf_video *);
 void xf_video_tick(xf_video *, uint32_t now);
 void xf_video_pause(xf_video *, uint32_t now);
 void xf_video_stop(xf_video *);

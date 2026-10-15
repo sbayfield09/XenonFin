@@ -14,7 +14,7 @@ static unsigned char vertex_bytes[4096] __attribute__((aligned(128)));
 static struct XenosVertexBuffer vb;
 static struct XenosShader shaders[2];
 static struct XenosSurface *target,*bound[3];
-static unsigned shader_count,inits,blits,invalidations,draws,reclaims,steps;
+static unsigned shader_count,inits,blits,invalidations,draws,reclaims,steps,allocations,clears;
 static uint64_t now;
 static uint32_t token;
 static int automatically_complete=1;
@@ -22,7 +22,7 @@ uint64_t xf_monotonic_us(void) { return now; }
 int xf_framebuffer_video_area(unsigned *x,unsigned *y,unsigned *w,unsigned *h,unsigned *footer) {*x=32;*y=128;*w=640;*h=384;*footer=33;return 1;}
 int xf_framebuffer_video_copy(const void *pixels,unsigned x,unsigned y,unsigned w,unsigned h) {
     const uint32_t *p=pixels;CHECK(x==32 && y==128 && w==640 && h==384);++blits;
-    if(!draws) { CHECK(p[xf_video_tile(0,0,640)]==0xff000000); CHECK(p[xf_video_tile(320,192,640)]==0xffffffff); }
+    if(!draws) { CHECK(p[xf_video_tile(0,0,640)]==0x00000000); CHECK(p[xf_video_tile(320,192,640)]==0xffffff00); }
     else CHECK(p[0]==0xffabcdef);
     return 1;
 }
@@ -37,7 +37,7 @@ void Xe_ShaderApplyVFetchPatches(struct XenosDevice *d,struct XenosShader *s,uns
 struct XenosVertexBuffer *Xe_CreateVertexBuffer(struct XenosDevice *d,int length) {(void)d;CHECK(length==4096);vb.base=vertex_bytes;return &vb;}
 struct XenosSurface *Xe_CreateTexture(struct XenosDevice *d,unsigned w,unsigned h,unsigned levels,int format,int tiled) {
     struct XenosSurface *s=calloc(1,sizeof(*s));(void)d;CHECK(s!=NULL && levels==1);
-    s->width=(int)w;s->height=(int)h;s->format=format;s->tiled=tiled;s->bypp=(format&XE_FMT_MASK)==XE_FMT_8?1:4;
+    ++allocations; s->width=(int)w;s->height=(int)h;s->format=format;s->tiled=tiled;s->bypp=(format&XE_FMT_MASK)==XE_FMT_8?1:4;
     s->wpitch=(w*s->bypp+127)&~127U;s->hpitch=(h+31)&~31U;s->base=calloc(s->hpitch,s->wpitch);CHECK(s->base!=NULL);return s;
 }
 void Xe_DestroyTexture(struct XenosDevice *d,struct XenosSurface *s) {(void)d;free(s->base);free(s);}
@@ -48,7 +48,7 @@ void *Xe_VB_Lock(struct XenosDevice *d,struct XenosVertexBuffer *b,int offset,in
 void Xe_VB_Unlock(struct XenosDevice *d,struct XenosVertexBuffer *b) {(void)d;(void)b;}
 void Xe_InvalidateState(struct XenosDevice *d) {(void)d;}
 void Xe_SetClearColor(struct XenosDevice *d,uint32_t c) {(void)d;CHECK(c==0xff000000);}
-void Xe_Clear(struct XenosDevice *d,int flags) {(void)d;CHECK(flags==XE_CLEAR_COLOR);}
+void Xe_Clear(struct XenosDevice *d,int flags) {(void)d;CHECK(flags==XE_CLEAR_COLOR);++clears;}
 #define NOOP_INT(name) void name(struct XenosDevice *d,int v) {(void)d;(void)v;}
 NOOP_INT(Xe_SetZEnable)
 NOOP_INT(Xe_SetZWrite)
@@ -81,14 +81,18 @@ int main(void) {
     memset(y,235,sizeof(y));memset(cb,128,sizeof(cb));memset(cr,128,sizeof(cr));
     xf_video_native_backend(&backend,0);CHECK(backend.begin(NULL,&info,message,sizeof(message)));
     CHECK(backend.submit(NULL,&image,message,sizeof(message)) && backend.poll(NULL,message,sizeof(message))==1);
-    CHECK(blits==1 && !inits);backend.end(NULL);CHECK(invalidations==1);
+    CHECK(blits==0 && !inits);CHECK(backend.present(NULL,message,sizeof(message)) && blits==1);backend.end(NULL);CHECK(invalidations==1);
     memset(cb,77,sizeof(cb));memset(cr,199,sizeof(cr));
     xf_video_native_backend(&backend,1);CHECK(backend.begin(NULL,&info,message,sizeof(message)));
     CHECK(inits==1 && blits==1);CHECK(backend.submit(NULL,&image,message,sizeof(message)));CHECK(blits==1);
-    CHECK(backend.poll(NULL,message,sizeof(message))==1 && blits==2 && reclaims==1 && steps==1);
+    CHECK(backend.poll(NULL,message,sizeof(message))==1 && blits==1 && reclaims==1 && steps==1);
+    CHECK(backend.present(NULL,message,sizeof(message)) && blits==2);
     automatically_complete=0;CHECK(backend.submit(NULL,&image,message,sizeof(message)));before=blits;
-    now=100000;CHECK(backend.poll(NULL,message,sizeof(message))==0 && blits==before);
-    *(uint32_t *)(scratch+0x10100)=token;CHECK(backend.poll(NULL,message,sizeof(message))==1 && blits==before+1);
+    now=100000;CHECK(allocations==4 && clears==1);CHECK(backend.poll(NULL,message,sizeof(message))==0 && blits==before);
+    *(uint32_t *)(scratch+0x10100)=token;CHECK(backend.poll(NULL,message,sizeof(message))==1 && blits==before);
+    CHECK(backend.present(NULL,message,sizeof(message)) && blits==before+1);
+    CHECK(backend.stats->prepared==2 && backend.stats->gpu_completed==2 && backend.stats->presented==2);
+    CHECK(backend.stats->gpu_observed_us==100000 && backend.stats->gpu_poll_gap_us==0);
     CHECK(backend.submit(NULL,&image,message,sizeof(message)));now+=250000;
     CHECK(backend.poll(NULL,message,sizeof(message))==-1 && strstr(message,"timeout"));backend.end(NULL);
     xf_video_native_backend(&backend,0);CHECK(backend.begin(NULL,&info,message,sizeof(message))); /* Error does not gate CPU/UI. */

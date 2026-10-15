@@ -32,6 +32,7 @@ static xf_browser browser;
 enum { SECTION_COUNT = sizeof(sections)/sizeof(*sections) };
 static xf_music music;
 static xf_video video;
+static unsigned video_metrics_page;
 static unsigned text_width = 72;
 enum { REQUEST_PUBLIC, REQUEST_LOGIN, REQUEST_BROWSE };
 static int request_kind;
@@ -269,6 +270,14 @@ static void start_video(int gpu) {
     if(!xf_video_local_path(path,sizeof(path),video.message,sizeof(video.message))) return;
     xf_video_native_backend(&backend,gpu); xf_video_start(&video,path,&backend);
 }
+static void start_video_colours(int gpu) {
+    xf_video_backend backend;
+    if(xf_music_active(&music) || xenon_sound_get_unplayed() || http.active) {
+        snprintf(video.message,sizeof(video.message),"Stop music and wait for HTTP before the colour test."); return;
+    }
+    xf_video_native_backend(&backend,gpu); xf_video_start_colours(&video,&backend);
+}
+static double video_avg(uint64_t us, unsigned frames) { return frames?(double)us/frames/1000:0; }
 static void video_line(const char *format, ...) {
     char text[256], cell[128]; va_list arguments;
     va_start(arguments,format); vsnprintf(text,sizeof(text),format,arguments); va_end(arguments);
@@ -276,19 +285,32 @@ static void video_line(const char *format, ...) {
 }
 static void draw_video(void) {
     unsigned x,y,w,h,footer;
-    video_line("A: CPU/play-pause  Y: GPU  Start: pause  X: stop  B: Libraries");
+    video_line("A: CPU/pause Y: GPU X: stop B: back Up/Down: bars L/R: stats");
     video_line("%s | %ux%u | source %.3f FPS | %s",video.codec->name,video.info.width,video.info.height,video.info.fps,
         video.paused?"PAUSED":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED");
     video_line("%s",video.message);
     if(video.state==XF_VIDEO_LOADING) video_line("File: %u / %u bytes (maximum 8 MiB)",(unsigned)video.loaded,(unsigned)video.size);
     if(!xf_framebuffer_video_area(&x,&y,&w,&h,&footer)) { printf("  Display too small for video canvas plus diagnostics.\n"); return; }
     while((unsigned)xf_console_cursor_y()<footer) printf("\n");
-    video_line("FPS %u.%03u | decoded %u | shown %u | drop %u",video.fps_milli/1000,video.fps_milli%1000,video.decoded,video.rendered,video.dropped);
-    video_line("Decode avg %.2f/max %.2f ms | present avg %.2f ms",video.decoded?(double)video.decode_us/video.decoded/1000:0,(double)video.max_decode_us/1000,
-        video.rendered?(double)video.render_us/video.rendered/1000:0);
-    video_line("%s",video.backend.format?video.backend.format:"CPU or Xenos planar Y/U/V -> tiled BGRA");
-    video_line("Queue %u/%u (peak %u), pending %u | clock %lu.%03lu s",video.count,XF_VIDEO_QUEUE,video.max_occupancy,video.pending,
-        (unsigned long)(video.timeline_us/1000000),(unsigned long)((video.timeline_us/1000)%1000));
+    {
+        const xf_video_render_stats *m=video.backend.stats;
+        video_line("FPS %u.%03u avg %.2f | dec %u shown %u drop %u",video.fps_milli/1000,video.fps_milli%1000,
+            video.timeline_us && video.rendered>1?(double)(video.rendered-1)*1000000/video.timeline_us:0,video.decoded,video.rendered,video.dropped);
+        if(!video_metrics_page) {
+            video_line("ms D %.2f Cv %.2f Up %.2f | L/R: metrics",video_avg(video.decode_us,video.decoded),
+                m?video_avg(m->conversion_us,m->prepared):0,m?video_avg(m->upload_us,m->prepared):0);
+            video_line("Cmd %.2f GPU<=%.2f (poll %.2f) Copy %.2f ms",m?video_avg(m->commands_us,m->prepared):0,
+                m?video_avg(m->gpu_observed_us,m->gpu_completed):0,m?video_avg(m->gpu_poll_gap_us,m->gpu_completed):0,
+                m?video_avg(m->copy_us,m->presented):0);
+            video_line("Q %u/%u peak %u + prep %u | VSync 0 (off)",video.count,XF_VIDEO_QUEUE,video.max_occupancy,video.pending);
+        } else {
+            video_line("Demux 0 (ES) Qcopy %.2f UI %.2f Wait %.2f ms",video_avg(video.queue_copy_us,video.decoded),
+                video_avg(video.ui_us,video.ui_frames),video_avg(video.wait_us,video.loop_count));
+            video_line("Dmax %.2f ms | service %.1f%% | starvation %u",(double)video.max_decode_us/1000,
+                video.loop_us+video.wait_us?100.0*video.loop_us/(video.loop_us+video.wait_us):0,video.starved);
+            video_line("%s",video.backend.format?video.backend.format:"Up/Down: CPU/GPU bars; L/R metrics");
+        }
+    }
 }
 static void draw(int selected) {
     int i;
@@ -296,7 +318,7 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.5 - XeLL / local video test\n");
+    printf("\n  XENONFIN 0.5.1 - XeLL / local video test\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < SECTION_COUNT; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
@@ -352,7 +374,8 @@ int main(void) {
     xenos_init(VIDEO_MODE_AUTO); console_init(); usb_init(); xenon_sound_init();
     if (!xf_console_init()) { printf("Unsupported framebuffer geometry; text compositor not started.\n"); return 1; }
     for (;;) {
-        uint32_t now = xf_monotonic_ms(); char direction = 0, move = 0;
+        uint64_t loop_start=xf_monotonic_us();
+        uint32_t now = (uint32_t)(loop_start/1000); char direction = 0, move = 0;
         xf_network_tick(now); xf_http_tick(&http, now, xf_network_ready());
         xf_music_tick(&music, now, xf_network_ready());
         xf_video_tick(&video,now);
@@ -415,6 +438,8 @@ int main(void) {
                 if ((pad.start && !previous.start) || (pad.a && !previous.a)) { xf_music_pause(&music); redraw = 1; }
             }
             if(selected==8) {
+                if(move=='L' || move=='R') { video_metrics_page^=1; redraw=1; }
+                if((move=='U' || move=='D') && !xf_video_active(&video)) { start_video_colours(move=='D'); redraw=1; }
                 if(pad.x && !previous.x) { xf_video_stop(&video); redraw=1; }
                 if(pad.start && !previous.start) { xf_video_pause(&video,now); redraw=1; }
                 if(pad.y && !previous.y && !xf_video_active(&video)) { start_video(1); redraw=1; }
@@ -450,8 +475,20 @@ int main(void) {
         xf_console_poll(now);
         if (xf_console_ready() && xf_ui_due(&ui_clock, now, redraw,
                 !editing && (selected == 1 || selected == 7 || selected == 8 || http.active))) {
+            uint64_t ui_start=xf_monotonic_us();
             draw(selected); xf_ui_rendered(&ui_clock, now); redraw = 0;
+            if(selected==8 && video.state==XF_VIDEO_PLAYING) { video.ui_us+=xf_monotonic_us()-ui_start; ++video.ui_frames; }
         }
-        previous = pad; udelay(10000);
+        previous = pad;
+        {
+            uint64_t wait_start=xf_monotonic_us();
+            unsigned wait=xf_video_wait_us(&video);
+            /* Retain the original music/menu cadence. Only the silent video
+             * test uses bounded, deadline-aware 1..4 ms cooperative waits. */
+            udelay((int)wait);
+            if(video.state==XF_VIDEO_PLAYING && !video.paused && video.clock_started) {
+                video.loop_us+=wait_start-loop_start; video.wait_us+=xf_monotonic_us()-wait_start; ++video.loop_count;
+            }
+        }
     }
 }

@@ -44,18 +44,34 @@ unsigned xf_video_tile(unsigned x, unsigned y, unsigned pitch) {
     return (((y>>5)*32*pitch+((x>>5)<<10)+(x&3)+((y&1)<<2)+(((x&31)>>2)<<3)+(((y&31)>>1)<<6))^((y&8)<<2));
 }
 static unsigned clip(int v) { return v<0?0U:v>255?255U:(unsigned)v; }
+/* console_pset() in the pinned libXenon console is the authoritative CPU
+ * scanout ABI: (b<<24)|(g<<16)|(r<<8). On big-endian Xenon memory is B,G,R,X.
+ * XE_FMT_BGRA names memory/component ordering, NOT a native 0xAARRGGBB word.
+ * The unused low byte is zero, exactly as in console_pset(). */
+uint32_t xf_video_bgra(unsigned r, unsigned g, unsigned b) {
+    return (b<<24)|(g<<16)|(r<<8);
+}
 void xf_video_pixels(uint32_t *tiled, unsigned width, unsigned height, const xf_video_image *image, const xf_video_rect *rect) {
-    unsigned x,y;
-    for(y=0;y<width*height;++y) tiled[y]=0xff000000U;
+    unsigned x,y,last_sy=~0U, xmap[XF_VIDEO_MAX_WIDTH];
+    uint32_t line[XF_VIDEO_MAX_WIDTH];
+    memset(tiled,0,width*height*sizeof(*tiled));
+    /* Divide only once per output column, convert each source scanline once.
+     * The old loop divided and converted again for every scaled output pixel. */
+    for(x=0;x<rect->width;++x) xmap[x]=x*image->width/rect->width;
     for(y=0;y<rect->height;++y) {
         unsigned sy=y*image->height/rect->height;
-        for(x=0;x<rect->width;++x) {
-            unsigned sx=x*image->width/rect->width;
-            int l=(int)image->y[sy*image->y_stride+sx]-16;
-            int cb=(int)image->cb[(sy/2)*image->c_stride+sx/2]-128;
-            int cr=(int)image->cr[(sy/2)*image->c_stride+sx/2]-128;
-            unsigned r=clip((298*l+409*cr+128)>>8), g=clip((298*l-100*cb-208*cr+128)>>8), b=clip((298*l+516*cb+128)>>8);
-            tiled[xf_video_tile(rect->x+x,rect->y+y,width)]=0xff000000U|(r<<16)|(g<<8)|b;
+        if(sy!=last_sy) {
+            for(x=0;x<image->width;++x) {
+                int l=(int)image->y[sy*image->y_stride+x]-16;
+                int cb=(int)image->cb[(sy/2)*image->c_stride+x/2]-128;
+                int cr=(int)image->cr[(sy/2)*image->c_stride+x/2]-128;
+                /* ITU-R BT.601 limited range: Y 16..235, Cb/Cr 16..240. */
+                unsigned r=clip((298*l+409*cr+128)>>8), g=clip((298*l-100*cb-208*cr+128)>>8), b=clip((298*l+516*cb+128)>>8);
+                line[x]=xf_video_bgra(r,g,b);
+            }
+            last_sy=sy;
         }
+        for(x=0;x<rect->width;++x)
+            tiled[xf_video_tile(rect->x+x,rect->y+y,width)]=line[xmap[x]];
     }
 }

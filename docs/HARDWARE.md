@@ -1,6 +1,6 @@
 # Xbox 360 acceptance checklist
 
-**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. The user has since confirmed the text flicker fix. Version 0.5 adds the silent local MPEG-1 test; [physical video validation](NATIVE_VIDEO.md) is pending. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
+**User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. The user has since confirmed the text flicker fix. The user has now confirmed MPEG-1 decoding and CPU/GPU video in 0.5, with incorrect CPU colours and frame drops. [0.5.1 colour/timing verification](NATIVE_VIDEO.md) is pending. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
 
 | Check | Expected behavior | Status |
 |---|---|---|
@@ -32,4 +32,4 @@ For each codec/resolution, record decoded/presented FPS, dropped/late frames, au
 
 ## Version 0.5 local video acceptance
 
-Follow [NATIVE_VIDEO.md](NATIVE_VIDEO.md): FAT USB load, actual moving decoded pattern, correct aspect/colors, CPU/GPU performance counters, pause/resume, stop/return and subsequent music/library regression. All video hardware results are pending; source/build/host tests do not replace them.
+Follow [NATIVE_VIDEO.md](NATIVE_VIDEO.md): FAT USB load, actual moving decoded pattern, correct aspect/colors, CPU/GPU performance counters, pause/resume, stop/return and subsequent music/library regression. 0.5 video runs on hardware; 0.5.1 colour/cadence results are pending. Test known bars and all three 30 FPS benchmark sizes using both timing pages. Source/build/host tests do not replace physical measurements.

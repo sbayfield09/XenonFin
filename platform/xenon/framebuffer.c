@@ -41,6 +41,10 @@ static uint32_t pixels[2][XF_SURFACE_BYTES / 4] __attribute__((aligned(65536)));
 static unsigned width, height, pitch, padded_height, origin_x, origin_y;
 static unsigned char *display;
 static int presented = -1;
+/* Cache lines touched since each source was last compared. Keep the new
+ * front's bits until the next flip, so reverting a glyph is also detected. */
+#define XF_DIRTY_WORDS (XF_SURFACE_BYTES / XF_CACHE_LINE / 32U)
+static uint32_t dirty[2][XF_DIRTY_WORDS];
 static void barrier(void) {
 #ifdef XENON
     __asm__ volatile("sync" ::: "memory");
@@ -56,6 +60,7 @@ extern void *xf_test_map_display(uint32_t);
 static void clear(void *context, unsigned buffer, uint32_t color) {
     unsigned i; (void)context;
     for (i = 0; i < pitch * padded_height; ++i) pixels[buffer][i] = color;
+    memset(dirty[buffer],255,sizeof(dirty[buffer]));
 }
 static void glyph(void *context, unsigned buffer, unsigned column, unsigned row, const xf_console_cell *cell) {
     unsigned x, y; (void)context;
@@ -65,6 +70,7 @@ static void glyph(void *context, unsigned buffer, unsigned column, unsigned row,
             (px & 3) + ((py & 1) << 2) + (((px & 31) >> 2) << 3) + (((py & 31) >> 1) << 6)) ^ ((py & 8) << 2));
         unsigned bit = (fontdata_8x16[(unsigned)cell->character * 16 + y] >> (7 - x)) & 1;
         pixels[buffer][tile] = bit ? cell->foreground : cell->background;
+        dirty[buffer][tile / (32U*32U)] |= 1U << ((tile / 32U) & 31U);
     }
 }
 static void flush(void *context, unsigned buffer) {
@@ -82,6 +88,8 @@ static int flip(void *context, unsigned buffer) {
     } else {
         const unsigned char *previous = (const unsigned char *)pixels[presented];
         for (offset = 0; offset < size; offset += XF_CACHE_LINE) {
+            unsigned line=offset/XF_CACHE_LINE;
+            if (!((dirty[buffer][line/32] | dirty[presented][line/32]) & (1U << (line&31)))) continue;
             if (memcmp(source + offset, previous + offset, XF_CACHE_LINE)) {
                 /* Write finished glyph pixels directly, including spaces that
                  * erase shortened values. Unchanged text is never touched. */
@@ -90,6 +98,7 @@ static int flip(void *context, unsigned buffer) {
             }
         }
     }
+    if(presented>=0 && presented!=(int)buffer) memset(dirty[presented],0,sizeof(dirty[presented]));
     barrier(); presented = (int)buffer; return 1;
 }
 static int complete(void *context, unsigned buffer) {
@@ -111,7 +120,7 @@ int xf_framebuffer_init(xf_console_backend *backend, unsigned *columns, unsigned
     if (xenos_is_overscan()) { origin_x = width / 28; origin_y = height / 28; }
     *columns = (width - 2 * origin_x) / 8; *rows = (height - 2 * origin_y) / 16;
     backend->clear = clear; backend->glyph = glyph; backend->flush = flush; backend->flip = flip; backend->complete = complete; backend->context = 0;
-    presented = -1; return 1;
+    memset(dirty,0,sizeof(dirty)); presented = -1; return 1;
 }
 void xf_framebuffer_shutdown(void) { /* Original video mode/address never changed. */ }
 

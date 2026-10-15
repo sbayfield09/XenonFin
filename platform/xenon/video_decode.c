@@ -40,7 +40,7 @@ static int preflight(const unsigned char *data, size_t size, xf_video_info *info
             unsigned w=(data[i+4]<<4)|(data[i+5]>>4), h=((data[i+5]&15)<<8)|data[i+6];
             unsigned r=data[i+7]&15, a=data[i+7]>>4;
             if(!w || !h || (w&1) || (h&1) || w>XF_VIDEO_MAX_WIDTH || h>XF_VIDEO_MAX_HEIGHT || !r || r>5 || !a || a>14)
-                return reject(error,cap,"Need even dimensions <=640x360, MPEG-1 23.976 to 30 FPS, valid pixel aspect.");
+                return reject(error,cap,"Need even dimensions <=720x480, MPEG-1 23.976 to 30 FPS, valid pixel aspect.");
             if(info->width && (w!=info->width || h!=info->height || r!=rate || a!=aspect))
                 return reject(error,cap,"Changing video format within a test clip is unsupported.");
             info->width=w; info->height=h; rate=r; aspect=a;
