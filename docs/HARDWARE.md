@@ -37,3 +37,7 @@ Follow [NATIVE_VIDEO.md](NATIVE_VIDEO.md): FAT USB load, actual moving decoded p
 ## Version 0.6 streaming acceptance
 
 Follow [NATIVE_VIDEO_STREAMING.md](NATIVE_VIDEO_STREAMING.md) for exact server requirements, movie/episode details → A, actual moving pictures, at least five minutes of continuous playback, timer/FPS/drop/underrun/PS-ES queue measurements, pause/resume, X stop/B return and server encoding cleanup. Do not count HTTP 200 alone as success. Streamed physical pictures, controls, failure recovery and five-minute stability are pending; host API/decoder tests are separate evidence. Retest MP3 sound and library/login/navigation after video.
+
+## Version 0.7 movie sound and synchronisation
+
+The user confirmed real 0.6 streaming at approximately 30 FPS / 720×414, zero dropped frames. Follow [NATIVE_AV.md](NATIVE_AV.md) for movie soundtrack output, actual DMA clock/PCM/rate/counters, five-minute flash/beep and dialogue measurements, joint pause/resume, short interruption/recovery, early audio tail and stop/return. Hearing both A/V does not establish synchronisation. New 0.7 sound/sync acceptance remains pending; report measured physical flash/beep offsets at start and after five minutes separately from host simulation.

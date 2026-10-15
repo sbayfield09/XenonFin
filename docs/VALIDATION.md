@@ -1,5 +1,11 @@
 # Validation — 14 October 2026
 
+## Native 0.7 update — 15 October 2026
+
+The user confirmed 0.6 real Xbox streaming/GPU MPEG-1 at approximately 720×414/30 with zero drops. Native 0.7 adds actual MP3 movie decode/PCM and a hardware-consumption audio master to that pipeline; **physical movie audio and synchronisation remain pending**. [Implementation, server requirements and exact flash/beep hardware test](NATIVE_AV.md).
+
+Production native C checks cover raw MP3 in MPEG-PS, shared 33-bit PTS wrap, sample-exact alignment, DMA consumption rather than submission, frozen/slower output clocks, PCM assembly, joint pause/rebuffer, stop reporting and malformed audio/headers. Disposable real Jellyfin 10.10.7 + FFmpeg 7.1.5 tests exercise decoded movie/episode PCM (mono and 5.1→stereo), known flash/beep timing, a 20-second pause, five-second network interruption/recovery, video-only fallback, positive offset, early audio end and timestamp-gapped sources. Source gaps are placed by PCM timestamp mappings; the continuous long benchmark resamples copied AAC loop boundaries into a continuous input instead of mislabelling synthetic gaps as client clock drift. The continuous five-minute host run displays 9,000/9,000 frames, decodes 12,502 MP3 frames and consumes 14,401,536 stereo PCM frames, with zero drops/underruns/bridging/late trims/timestamp corrections; [recorded counters](native-av-metrics.json). Host device/display adapters cannot establish real Xbox output latency. Existing native music, decoder/colour, renderer, network/login/browsing and ASan/UBSan suites remain enabled.
+
 ## Native 0.6 update — 15 October 2026
 
 The user confirmed native 0.5.2 on Xbox: **720×480/30, 240 decoded, 240 presented, zero dropped**, correct colours, timing and the working audio/network/library baseline. Native 0.6 adds actual Jellyfin movie/episode MPEG-1 streaming in C without replacing that decoder/scheduler/renderer. **New streamed physical Xbox frames and five-minute stability remain pending.** [Server configuration, host evidence and exact physical test procedure](NATIVE_VIDEO_STREAMING.md).

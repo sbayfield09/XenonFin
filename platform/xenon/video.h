@@ -43,6 +43,9 @@ typedef struct {
     uint64_t origin_us, origin_pts, paused_us, pause_at, last_decoded_pts, last_present_pts;
     uint64_t pending_work_us, pending_source_work_us, pending_span_us, prepare_at, decode_estimate_us, late_threshold_us, last_present_at;
     int64_t drift_us;
+    int (*master_clock)(void *,uint64_t *);
+    void *master_context;
+    unsigned master_wait;
     unsigned drop_reason[XF_DROP_REASONS], decode_failures, gpu_stalls, eof_events, full_ticks, clock_faults, cancelled;
     unsigned pending_stall, trace_count, trace_overwritten;
     xf_video_trace trace[XF_VIDEO_TRACE];
@@ -63,6 +66,7 @@ int xf_video_options(xf_video *, unsigned sync, uint64_t lateness_us);
 int xf_video_export(const xf_video *, const char *path);
 int xf_video_ui_safe(xf_video *);
 void xf_video_service(xf_video *);
+void xf_video_master(xf_video *,int (*)(void *,uint64_t *),void *);
 void xf_video_tick(xf_video *, uint32_t now);
 void xf_video_pause(xf_video *, uint32_t now);
 void xf_video_stop(xf_video *);

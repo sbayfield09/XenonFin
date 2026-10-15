@@ -40,6 +40,27 @@ static void framing(void){
     ps_reset();put(pack,sizeof(pack));put(packets,sizeof(packets));put(pack,sizeof(pack));CHECK(xf_video_ps_tick(&ps,sink,space,0)<0);
     ps_reset();for(i=0;i<XF_PS_RING;++i)CHECK(xf_video_ps_byte(&ps,0));CHECK(!xf_video_ps_space(&ps) && !xf_video_ps_byte(&ps,0));
 }
+static unsigned char audio_output[8];static unsigned audio_used,stamps;static int64_t unwrapped[8];static unsigned kinds[8];
+static int audio_sink(void *p,unsigned char c){(void)p;CHECK(audio_used<sizeof(audio_output));audio_output[audio_used++]=c;return 1;}
+static size_t audio_space(void *p){(void)p;return sizeof(audio_output)-audio_used;}
+static int timestamp(void *p,unsigned kind,uint64_t offset,int64_t pts){(void)p;CHECK(stamps<8);CHECK(offset==(kind?audio_used:used));unwrapped[stamps]=pts;kinds[stamps++]=kind;return 1;}
+static void packet(unsigned kind,uint64_t pts,unsigned char value){
+    unsigned char bytes[]={0,0,1,0xe0,0,6,0,0,0,0,0,0};unsigned i;
+    bytes[3]=(unsigned char)(kind?0xc0:0xe0);bytes[6]=(unsigned char)(0x21|((pts>>29)&14));bytes[7]=(unsigned char)(pts>>22);
+    bytes[8]=(unsigned char)(((pts>>14)&254)|1);bytes[9]=(unsigned char)(pts>>7);bytes[10]=(unsigned char)((pts<<1)|1);bytes[11]=value;
+    for(i=0;i<sizeof(bytes);++i){put(bytes+i,1);CHECK(xf_video_ps_tick(&ps,sink,space,0)>=0);}
+}
+static void timestamps(void){
+    uint64_t wrap=1ULL<<33;
+    ps_reset();audio_used=stamps=0;xf_video_ps_audio(&ps,audio_sink,audio_space,NULL);xf_video_ps_timestamps(&ps,timestamp,NULL);put(pack,sizeof(pack));
+    packet(0,wrap-90000,11);packet(1,wrap-89900,22);packet(1,500,33);packet(0,1000,44);
+    CHECK(xf_video_ps_tick(&ps,sink,space,1)>=0 && ps.ended && audio_used==2 && used==2 && ps.audio_packets==2 && ps.packets==2);
+    CHECK(unwrapped[0]==(int64_t)wrap-90000 && unwrapped[1]==(int64_t)wrap-89900 && unwrapped[2]==(int64_t)wrap+500 && unwrapped[3]==(int64_t)wrap+1000);
+    CHECK(!kinds[0] && kinds[1] && ps.audio_bytes==2 && ps.video_bytes==2 && ps.first_audio_pts==unwrapped[1]);
+    ps_reset();xf_video_ps_timestamps(&ps,timestamp,NULL);put(pack,sizeof(pack));
+    put((const unsigned char *)"\0\0\1\xe0\0\2\x0f\xaa",8);
+    CHECK(xf_video_ps_tick(&ps,sink,space,0)<0 && strstr(ps.error,"initial"));
+}
 static const char valid[]="{\"PlaySessionId\":\"session\",\"MediaSources\":[{\"Id\":\"source\",\"Protocol\":\"File\",\"Container\":\"mov,mp4\",\"SupportsTranscoding\":true,\"TranscodingSubProtocol\":\"http\",\"TranscodingContainer\":\"mpeg\",\"RunTimeTicks\":3000000000,\"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"h264\",\"Width\":1920,\"Height\":1080,\"Index\":0,\"VideoRangeType\":\"SDR\"},{\"Type\":\"Audio\",\"Codec\":\"aac\"}]}]}";
 static int parse(const char *json,xf_video_source *s){char error[180];xf_response_init(&response);response.status=200;response.complete=1;snprintf(response.body,sizeof(response.body),"%s",json);response.body_size=strlen(json);return xf_video_source_parse(&response,"movie","device",s,error,sizeof(error));}
 static void negotiation(void){
@@ -68,4 +89,4 @@ static void http64(void){
     h="HTTP/1.1 200 OK\r\nContent-Length: 18446744073709551616\r\n\r\n";
     xf_response_stream(&response,discard,NULL,UINT64_MAX);xf_response_feed(&response,h,strlen(h));CHECK(response.failed);
 }
-int main(void){framing();negotiation();http64();printf("Native MPEG-PS boundaries/backpressure/format rejection, negotiation and 64-bit HTTP: %u assertions passed\n",checks);return 0;}
+int main(void){framing();timestamps();negotiation();http64();printf("Native MPEG-PS boundaries/backpressure/format rejection, negotiation and 64-bit HTTP: %u assertions passed\n",checks);return 0;}

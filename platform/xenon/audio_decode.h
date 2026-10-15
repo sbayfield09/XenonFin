@@ -16,6 +16,12 @@ typedef struct {
     int tag_checked, have_previous, finished, failed;
     int16_t previous[2];
     uint64_t source_frames, output_frames;
+    /* Movie mode keeps the existing music defaults intact (budget zero = 8).
+     * Frame offsets refer to the compressed elementary stream, before consume. */
+    unsigned low_latency, decode_budget;
+    uint64_t consumed_bytes;
+    void (*on_frame)(void *,uint64_t byte_offset,uint64_t output_frame);
+    void *frame_context;
     char error[128];
 } xf_audio_decoder;
 void xf_audio_decoder_init(xf_audio_decoder *);

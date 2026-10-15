@@ -209,7 +209,7 @@ static void draw_browser(void) {
         wrapped(it->overview, browser.detail_scroll, rows);
         if (!it->overview[0]) printf("  No overview supplied by server.\n");
         if(!strcmp(it->type,"Audio"))printf("  A: play music   B: list   Back/View: now playing\n");
-        else if(!strcmp(it->type,"Movie") || !strcmp(it->type,"Episode"))printf("  A: play silent Jellyfin video   B: return to list\n");
+        else if(!strcmp(it->type,"Movie") || !strcmp(it->type,"Episode"))printf("  A: play Jellyfin video + audio   B: return to list\n");
         else printf("  B: return to list.\n");
     } else {
         if (!browser.loaded) printf("  A: load accessible Jellyfin libraries.\n");
@@ -320,14 +320,17 @@ static void video_save_trace(void) {
     snprintf(path,sizeof(path),"%.*s/xenonfin-video.csv",(int)(colon-source+1),source);
     snprintf(video.message,sizeof(video.message),"%s",xf_video_export(&video,path)?"Saved USB root xenonfin-video.csv (overwrites previous trace).":"CSV write failed; keep USB inserted.");
 }
+static void pause_video(uint32_t now) {
+    if(xf_jvideo_active(&jvideo))xf_jvideo_pause(&jvideo,now);else xf_video_pause(&video,now);
+}
 static void draw_video(void) {
     unsigned x,y,w,h,footer;
     const xf_video_render_stats *m=video.backend.stats;
     if(jvideo.state!=XF_JV_IDLE)video_line("A/Start pause X stop B back L/R stats | %s",jvideo.title);
     else video_line("A CPU/pause Y GPU X stop B back L/R stats LT late RT sync");
-    video_line("%s %ux%u %.2f FPS | %s | %llu:%02llu | %u/8",video.codec->name,video.info.width,video.info.height,video.info.fps,
+    video_line("%s %ux%u %.2f FPS | %s | %llu:%02llu | %u/10",video.codec->name,video.info.width,video.info.height,video.info.fps,
         jvideo.state==XF_JV_NEGOTIATING?"NEGOTIATING":jvideo.state==XF_JV_STOPPING?"STOPPING":video.state==XF_VIDEO_ERROR || jvideo.state==XF_JV_ERROR?"ERROR":
-        video.paused?"PAUSED":video.buffering?"BUFFERING":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED",
+        video.paused || (jvideo.pause_requested && jvideo.audio.enabled && !jvideo.audio.queued)?"PAUSED":jvideo.pause_requested?"PAUSING":video.buffering?"BUFFERING":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED",
         (unsigned long long)(video.timeline_us/60000000),(unsigned long long)((video.timeline_us/1000000)%60),video_metrics_page+1);
     video_line("%s",jvideo.state!=XF_JV_IDLE?jvideo.message:video.message);
     if(video.state==XF_VIDEO_LOADING && !video.streaming) video_line("File: %u / %u bytes (maximum 8 MiB)",(unsigned)video.loaded,(unsigned)video.size);
@@ -370,12 +373,23 @@ static void draw_video(void) {
         video_line("Net %u kbit/s | PS %u/%u ES %u/%u bytes",jvideo.kbps,(unsigned)jvideo.ps.count,XF_PS_RING,(unsigned)xf_mpeg1_stream_used(),XF_VIDEO_ES_BUFFER);
         video_line("Timer %llu:%02llu / %llu:%02llu | underruns %u",(unsigned long long)(video.timeline_us/60000000),(unsigned long long)((video.timeline_us/1000000)%60),
             (unsigned long long)(jvideo.source.runtime/600000000),(unsigned long long)((jvideo.source.runtime/10000000)%60),video.underruns);
-    } else {
+    } else if(video_metrics_page==7) {
         video_line("Source %s / %s / %s %ux%u (%u sources)",jvideo.source.container,jvideo.source.video_codec,jvideo.source.audio_codec,jvideo.source.width,jvideo.source.height,jvideo.source.sources);
         video_line("Net p95/max %.2f/%.2f Demux %.2f/%.2f ms",(double)xf_time_p95(&jvideo.network_times)/1000,(double)jvideo.network_times.max/1000,
             (double)xf_time_p95(&jvideo.demux_times)/1000,(double)jvideo.demux_times.max/1000);
         if(jvideo.report_message[0])video_line("%s",jvideo.report_message);
         else video_line("Reports start/progress/stop/clean %u/%u/%u/%u | errs %u",jvideo.start_status,jvideo.progress_status,jvideo.stop_status,jvideo.cleanup_status,jvideo.report_errors);
+    } else if(video_metrics_page==8) {
+        video_line("Audio %s %u Hz %uch -> PCM 48000 Hz stereo",jvideo.audio.decoder.mp3_frames?"MP3 verified":jvideo.audio.enabled?"validating":"none",jvideo.audio.decoder.rate,jvideo.audio.decoder.channels);
+        video_line("PCM %u/%u DMA %u/%u ES %u/%u",(unsigned)jvideo.audio.decoder.pcm_size,XF_PCM_CAP,jvideo.audio.queued,XF_AV_DMA_BYTES,(unsigned)jvideo.audio.decoder.input_size,XF_COMPRESSED_CAP);
+        video_line("Audio underruns %u gaps %u | PES A/V %llu/%llu",jvideo.audio.underruns,jvideo.audio.gap_events,(unsigned long long)jvideo.ps.audio_packets,(unsigned long long)jvideo.ps.packets);
+    } else {
+        uint64_t position=video.timeline_us;
+        if(jvideo.audio.enabled)position=jvideo.audio.played*1000000/48000;
+        if(jvideo.audio.enabled && xf_jvideo_active(&jvideo))xf_av_audio_clock(&jvideo.audio,&position);
+        video_line("Audio %.3fs | V-A %+.2f ms maxlate %.2f",(double)position/1000000,(double)((int64_t)video.last_present_pts-(int64_t)position)/1000,(double)video.lateness.max/1000);
+        video_line("PTS A-V %+.2f markerr %+.2f ms | late PCM %llu",(double)jvideo.audio.initial_offset_us/1000,(double)jvideo.audio.timestamp_error_us/1000,(unsigned long long)jvideo.audio.late_frames);
+        video_line("MP3 avg/max %.2f/%.2f ms | played %llu sent %llu",video_avg(jvideo.audio_times.sum,jvideo.audio_times.count),(double)jvideo.audio_times.max/1000,(unsigned long long)jvideo.audio.played,(unsigned long long)jvideo.audio.submitted);
     }
 }
 static void draw(int selected) {
@@ -384,7 +398,7 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.6 - XeLL / Jellyfin video\n");
+    printf("\n  XENONFIN 0.7 - XeLL / Jellyfin video\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < SECTION_COUNT; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
@@ -435,7 +449,7 @@ int main(void) {
     xf_ui_clock ui_clock = {0, 0};
     xf_audio_backend audio = { audio_queued, audio_free, audio_submit, NULL };
     memset(&previous, 0, sizeof(previous)); xf_http_init(&http); xf_browser_init(&browser);
-    xf_music_init(&music, &audio); xf_video_init(&video,&xf_mpeg1_codec);xf_jvideo_init(&jvideo,&video);
+    xf_music_init(&music, &audio); xf_video_init(&video,&xf_mpeg1_codec);xf_jvideo_init(&jvideo,&video);xf_jvideo_audio(&jvideo,&audio);
     /* Preserve the hardware-tested initialization order. */
     xenos_init(VIDEO_MODE_AUTO); console_init(); usb_init(); xenon_sound_init();
     if (!xf_console_init()) { printf("Unsupported framebuffer geometry; text compositor not started.\n"); return 1; }
@@ -506,7 +520,7 @@ int main(void) {
                 if ((pad.start && !previous.start) || (pad.a && !previous.a)) { xf_music_pause(&music); redraw = 1; }
             }
             if(selected==8) {
-                if(move=='L' || move=='R') { video_metrics_page=(video_metrics_page+(move=='R'?1:7))%8; redraw=1; }
+                if(move=='L' || move=='R') { video_metrics_page=(video_metrics_page+(move=='R'?1:9))%10; redraw=1; }
                 if(!xf_video_active(&video) && !xf_jvideo_active(&jvideo)) {
                     if(pad.rt>128 && previous.rt<=128) {xf_video_options(&video,(video.next_sync_mode+1)%3,video.next_late_threshold_us);redraw=1;}
                     if(pad.lt>128 && previous.lt<=128) {
@@ -517,11 +531,11 @@ int main(void) {
                 }
                 if((move=='U' || move=='D') && !xf_video_active(&video) && !xf_jvideo_active(&jvideo)) { start_video_colours(move=='D'); redraw=1; }
                 if(pad.x && !previous.x) { xf_jvideo_stop(&jvideo,now);xf_video_stop(&video); redraw=1; }
-                if(pad.start && !previous.start) { xf_video_pause(&video,now); redraw=1; }
+                if(pad.start && !previous.start) { pause_video(now); redraw=1; }
                 if(pad.y && !previous.y && !xf_video_active(&video) && !xf_jvideo_active(&jvideo)) { if(jvideo.state!=XF_JV_IDLE)start_network_video(&selected_video,now);else start_video(1);redraw=1; }
             }
             if (pad.a && !previous.a) {
-                if(selected==8) { if(xf_video_active(&video)) xf_video_pause(&video,now); else if(!xf_jvideo_active(&jvideo)) {if(jvideo.state!=XF_JV_IDLE)start_network_video(&selected_video,now);else start_video(0);} }
+                if(selected==8) { if(xf_video_active(&video)) pause_video(now); else if(xf_jvideo_active(&jvideo))pause_video(now); else {if(jvideo.state!=XF_JV_IDLE)start_network_video(&selected_video,now);else start_video(0);} }
                 if (selected == 1) {
                     xf_http_cancel(&http); handle_result(); processed = 1;
                     printf("\n  Initializing existing NIC driver (12s PHY watchdog).\n  DHCP negotiation will continue cooperatively afterwards.\n");

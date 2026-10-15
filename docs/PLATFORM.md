@@ -1,5 +1,7 @@
 # Platform investigation and implementation boundary
 
+**0.7 update:** user-confirmed 0.6 real Jellyfin streaming/GPU MPEG-1 at approximately 720×414/30, zero drops. Native 0.7 adds MPEG-PS MP3 extraction, existing minimp3/PCM conversion and an actual DMA-consumption master for the preserved video scheduler. [NATIVE_AV.md](NATIVE_AV.md) documents architecture and pending physical sound/sync acceptance. It uses the same toolchain; there is no new XDK, codec port or hardware pause assumption. Earlier release status below is historical.
+
 **0.6 status:** the user confirmed 0.5.2 local 720×480/30 video at **240/240 frames, zero drops**, completing the initial local-video prerequisite. Native 0.6 adds Jellyfin MPEG-1/MPEG-PS negotiation, bounded incremental HTTP/PES input, controls and reports, and reuses that decoder/scheduler/renderer. Real Jellyfin host/API/decoder and cross-build evidence is documented in [NATIVE_VIDEO_STREAMING.md](NATIVE_VIDEO_STREAMING.md); streamed Xbox pictures and five-minute console stability remain pending. No movie audio/HD codec/artwork was added. Earlier investigation details below are retained as history.
 
 Investigated 14 October 2026 using source checkouts, upstream build rules, and actual compilation. No physical Xbox 360 was connected to this environment.
@@ -49,10 +51,10 @@ Progress against the requested stages:
 
 ## Work needed to finish the Xbox client
 
-1. Test [0.6 Jellyfin streaming](NATIVE_VIDEO_STREAMING.md) on the console: actual movie/episode images, five-minute continuous run, pause/resume, stop and return, source compatibility and server cleanup.
+1. Test [0.7 audio/video synchronisation](NATIVE_AV.md) on the console: actual movie/episode images, five-minute continuous run, pause/resume, stop and return, source compatibility and server cleanup.
 2. Compare streaming network/demux p95/max, buffer occupancy/underruns and the preserved local 0.5.2 decode/render/clock diagnostics before performance changes.
 3. Retest actual MP3 audio, network/authentication, libraries, controller/UI, cable loss and repeated playback on hardware. Broader models/display modes and long-run stability remain unmeasured.
-4. Native persistence, verified TLS, artwork, seeking and movie audio/A-V synchronisation remain future work. Never advertise HD codecs or copy an unsupported original into the MPEG-1 decoder.
+4. Native persistence, verified TLS, artwork and seeking remain future work; movie audio/A-V synchronisation is implemented for hardware acceptance. Never advertise HD codecs or copy an unsupported original into the MPEG-1 decoder.
 5. Complete the relevant physical acceptance matrix before claiming broader support.
 
 The new presentation behavior and remaining native video work cannot be validated by host API/decoder tests or successful cross-compilation.

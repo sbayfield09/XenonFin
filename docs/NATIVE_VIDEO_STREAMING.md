@@ -1,5 +1,7 @@
 # XenonFin 0.6 — native Jellyfin video streaming
 
+**Current release:** [0.7 movie audio/synchronisation](NATIVE_AV.md). Downloads now contain 0.7. The user confirmed 0.6 silent streaming on Xbox at approximately 30 FPS / 720×414 with zero dropped frames. The investigation below records the earlier release; its original pending statements are historical.
+
 The user confirmed 0.5.2 **on Xbox 360**: correct CPU/GPU colours and 720×480/30 local MPEG-1 playback, 240 decoded, 240 displayed, zero dropped. Version 0.6 connects that decoder, frame scheduler and renderer to authenticated Jellyfin movie/episode streams. **The new streaming ELF still requires physical testing.** An HTTP 200, a host RGB conversion or a successful cross-build cannot establish Xbox video playback.
 
 ## Downloads and first console test

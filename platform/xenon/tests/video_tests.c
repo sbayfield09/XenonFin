@@ -13,6 +13,8 @@ static uint64_t micro,ready_at,pending_pts,last_pts,last_display,first_display;
 static unsigned calls,frames,submissions,displays,begins,ends,blocked,mode,stream_gate,available_frames;
 static unsigned decode_cost=600,prepare_cost=100,gpu_cost,copy_cost,variable_decode;
 static double fps=25;
+static uint64_t master_position;
+static int master(void *p,uint64_t *us){(void)p;*us=master_position;return 1;}
 static int open_codec(unsigned char *data,size_t size,xf_video_info *info,char *error,size_t cap) {
     (void)data;(void)size;(void)error;(void)cap; calls=0;
     info->width=info->height=16;info->fps=fps;info->pixel_aspect=1; return 1;
@@ -214,6 +216,18 @@ int main(void) {
     for(i=0;i<3000 && player.state!=XF_VIDEO_ENDED;++i)step(1000);
     CHECK(player.state==XF_VIDEO_ENDED && player.rendered==40 && !player.dropped && player.underruns==1);
     CHECK(player.timeline_us<1400000 && player.timeline_us>=1300000 && !player.clock_faults);
+    /* Audio master holds video even as the wall clock jumps. Every video
+     * deadline must follow output consumption, never submitted PCM/wall time. */
+    reset(20);fps=30;master_position=0;CHECK(xf_video_start_network(&player,&backend));xf_video_master(&player,master,NULL);
+    for(i=0;i<100;++i)step(10000);
+    CHECK(player.rendered==1 && player.timeline_us==0);
+    micro+=5000000;tick();CHECK(player.rendered==1 && !player.dropped);
+    for(i=1;i<20;++i) {
+        unsigned loops=0;master_position=xf_frame_pts(i,30,1);
+        while(player.rendered<=i && loops++<20)step(1000);
+        CHECK(player.rendered==i+1 && player.last_present_pts==master_position && !player.dropped);
+    }
+    CHECK(player.state==XF_VIDEO_ENDED);
     reset(5000);fps=30;decode_cost=100;prepare_cost=10;
     CHECK(xf_video_start(&player,filename,&backend));
     for(i=0;i<100000 && player.state!=XF_VIDEO_ENDED;++i) {tick();micro+=xf_video_wait_us(&player);}

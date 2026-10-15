@@ -10,7 +10,7 @@ int xf_audio_byte(void *context, unsigned char byte) {
     if (!xf_audio_space(d)) return 0;
     d->compressed[d->input_write] = byte; d->input_write = (d->input_write + 1) % XF_COMPRESSED_CAP; ++d->input_size; return 1;
 }
-static void consume(xf_audio_decoder *d, size_t n) { d->input_read = (d->input_read + n) % XF_COMPRESSED_CAP; d->input_size -= n; }
+static void consume(xf_audio_decoder *d, size_t n) { d->input_read = (d->input_read + n) % XF_COMPRESSED_CAP; d->input_size -= n; d->consumed_bytes+=n; }
 static void peek(xf_audio_decoder *d, size_t n) {
     size_t first = XF_COMPRESSED_CAP - d->input_read;
     if (first > n) first = n;
@@ -64,7 +64,7 @@ void xf_audio_decode_tick(xf_audio_decoder *d, int eof) {
         consume(d, n); d->tag_left -= (unsigned)n;
         if (d->tag_left) { if (eof) fail(d, "Truncated ID3 tag"); return; }
     }
-    for (budget = 0; budget < 8 && XF_PCM_CAP - d->pcm_size >= 32768; ++budget) {
+    for (budget = 0; budget < (d->decode_budget?d->decode_budget:8) && XF_PCM_CAP - d->pcm_size >= 32768; ++budget) {
         mp3dec_frame_info_t info;
         size_t n = d->input_size < XF_DECODE_WINDOW ? d->input_size : XF_DECODE_WINDOW;
         int frames;
@@ -78,9 +78,22 @@ void xf_audio_decode_tick(xf_audio_decoder *d, int eof) {
             }
             return;
         }
-        if (n < XF_DECODE_WINDOW && !eof) return;
-        peek(d, n);
+        if (!d->low_latency && n < XF_DECODE_WINDOW && !eof) return;
+        if(d->low_latency && n<4 && !eof)return;
+        peek(d,d->low_latency && n>=4?4:n);
         if (eof && n == 128 && !memcmp(d->window, "TAG", 3)) { consume(d, n); continue; }
+        if(d->low_latency && n>=4) {
+            size_t frame_size;
+            if(!hdr_valid(d->window) || 4-HDR_GET_LAYER(d->window)!=3) {
+                fail(d,"Movie stream is not MPEG Layer III (MP3) audio");return;
+            }
+            frame_size=(size_t)hdr_frame_bytes(d->window,0)+hdr_padding(d->window);
+            if(frame_size<5 || frame_size>XF_DECODE_WINDOW){fail(d,"Free-format/oversized movie MP3 is unsupported");return;}
+            if(n<frame_size){if(eof)fail(d,"Truncated movie MP3 frame");return;}
+            /* Raw PES supplies frame-aligned MP3. minimp3 explicitly accepts
+             * an exact complete frame; don't retain a 2 KiB tail until PS EOF. */
+            n=frame_size;peek(d,n);
+        }
         memset(&info, 0, sizeof(info));
         frames = mp3dec_decode_frame(&d->decoder, d->window, (int)n, d->samples, &info);
         if (!frames && info.frame_bytes == (int)n && !eof) {
@@ -91,8 +104,10 @@ void xf_audio_decode_tick(xf_audio_decoder *d, int eof) {
             if (eof) { fail(d, "Truncated or invalid MP3 frame"); return; }
             return;
         }
+        if(frames && d->on_frame)d->on_frame(d->frame_context,d->consumed_bytes+(unsigned)info.frame_offset,d->output_frames);
         consume(d, (size_t)info.frame_bytes);
         if (!frames) {
+            if(d->low_latency){fail(d,"Invalid MP3 frame/reservoir; refusing an unsynchronised skip");return;}
             d->bad_bytes += (unsigned)info.frame_bytes;
             if (d->bad_bytes > 65536) { fail(d, "Invalid MP3 data (64 KiB without audio)"); return; }
             continue;

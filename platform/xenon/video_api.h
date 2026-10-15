@@ -4,7 +4,7 @@
 typedef struct {
     char source_id[65],session_id[65],path[1501];
     char container[40],video_codec[40],audio_codec[40];
-    unsigned sources,width,height,video_index;
+    unsigned sources,width,height,video_index,audio_index,has_audio;
     uint64_t runtime;
     int transcoding;
 } xf_video_source;

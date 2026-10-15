@@ -9,7 +9,7 @@ CFLAGS := -std=gnu99 -O2 -g -Wall -Wextra $(MACHDEP) -I$(LIBXENON_INC)
 LDFLAGS := $(MACHDEP) -Wl,--gc-sections -Wl,--wrap=mdelay -T $(LDSCRIPT) -L$(LIBXENON_LIB)
 .PHONY: all clean
 all: $(TARGET).elf32
-SOURCES := main.c protocol.c json.c http.c browse.c text.c console_batch.c console_frame.c framebuffer.c ui_clock.c audio_decode.c music_api.c music.c tcp_client.c native_net.c driver_guard.c init_guard.c video.c video_api.c video_ps.c jvideo.c video_sync.c video_decode.c video_pixels.c video_native.c video_source.c
+SOURCES := main.c protocol.c json.c http.c browse.c text.c console_batch.c console_frame.c framebuffer.c ui_clock.c audio_decode.c music_api.c music.c tcp_client.c native_net.c driver_guard.c init_guard.c video.c video_audio.c video_api.c video_ps.c jvideo.c video_sync.c video_decode.c video_pixels.c video_native.c video_source.c
 # Keep unused upstream MP2/demux APIs out of this video-only bring-up ELF.
 ../../build/xenon/video_decode.o: CFLAGS += -ffunction-sections -fdata-sections
 OBJECTS := $(patsubst %.c,../../build/xenon/%.o,$(SOURCES))

@@ -13,17 +13,22 @@ int xf_video_ps_byte(void *context,unsigned char c) {
     if(s->count>s->peak)s->peak=s->count;
     return 1;
 }
+void xf_video_ps_audio(xf_video_ps *s,int (*byte)(void *,unsigned char),size_t (*space)(void *),void *context) {
+    s->audio_byte=byte;s->audio_space=space;s->audio_context=context;
+}
+void xf_video_ps_timestamps(xf_video_ps *s,int (*stamp)(void *,unsigned,uint64_t,int64_t),void *context) {s->stamp=stamp;s->stamp_context=context;}
 static unsigned at(const xf_video_ps *s,size_t i) {return s->ring[(s->head+i)%XF_PS_RING];}
 static void consume(xf_video_ps *s,size_t n) {s->head=(s->head+n)%XF_PS_RING;s->count-=n;}
 static int fail(xf_video_ps *s,const char *error) {s->failed=1;snprintf(s->error,sizeof(s->error),"%s",error);return -1;}
 static int pes(xf_video_ps *s,unsigned type,size_t length) {
     unsigned char *p=s->packet;size_t off=6,end=6+length,pts=0;
-    if(type!=0xe0) return 1; /* skip audio, private streams and other video IDs */
+    s->payload_kind=type==0xc0; s->stamp_pending=0;
     if(!length || end<=off) return fail(s,"Unbounded or empty MPEG-PS PES packet.");
     if((p[off]&0xc0)==0x80) {
         if(end-off<3 || (size_t)p[off+2]>end-off-3) return fail(s,"Truncated MPEG-2 PES header.");
         if((p[off+1]&0xc0)==0x40) return fail(s,"Invalid PES timestamp flags.");
         if(p[off+1]&0x80) {if(p[off+2]<5)return fail(s,"Missing PES timestamp.");pts=off+3;}
+        if((p[off+1]&0xc0)==0xc0 && p[off+2]<10)return fail(s,"Missing PES decoding timestamp.");
         off+=3+p[off+2];
     } else {
         unsigned n=0;
@@ -37,11 +42,25 @@ static int pes(xf_video_ps *s,unsigned type,size_t length) {
         else return fail(s,"Invalid MPEG-1 PES flags.");
         if(off>end) return fail(s,"Truncated PES timestamp.");
     }
+    if(!pts && s->stamp && !(s->payload_kind?s->have_audio_pts:s->have_video_pts))
+        return fail(s,"Missing initial audio/video PTS; cannot establish A/V alignment.");
     if(pts) {
         if(!(p[pts]&1) || !(p[pts+2]&1) || !(p[pts+4]&1)) return fail(s,"Invalid PES timestamp markers.");
         s->pts90k=((uint64_t)(p[pts]&14)<<29)|((uint64_t)p[pts+1]<<22)|((uint64_t)(p[pts+2]&254)<<14)|((uint64_t)p[pts+3]<<7)|(p[pts+4]>>1);
         s->have_pts=1;
+        if(!s->have_reference) {s->reference_pts=(int64_t)s->pts90k;s->have_reference=1;}
+        {
+            const uint64_t mask=(1ULL<<33)-1;
+            uint64_t diff=(s->pts90k-((uint64_t)s->reference_pts&mask))&mask;
+            int64_t delta=diff>=(1ULL<<32)?(int64_t)diff-(1LL<<33):(int64_t)diff;
+            s->timestamp=s->reference_pts+delta;
+            if(s->timestamp>s->reference_pts)s->reference_pts=s->timestamp;
+        }
+        if(s->payload_kind && !s->have_audio_pts){s->first_audio_pts=s->timestamp;s->have_audio_pts=1;}
+        if(!s->payload_kind && !s->have_video_pts){s->first_video_pts=s->timestamp;s->have_video_pts=1;}
+        s->stamp_pending=1;
     }
+    if(off==end)return fail(s,"Empty MPEG elementary payload.");
     s->payload=off;s->payload_end=end;return 1;
 }
 int xf_video_ps_tick(xf_video_ps *s,int (*sink)(unsigned char),size_t (*space)(void),int eof) {
@@ -50,10 +69,22 @@ int xf_video_ps_tick(xf_video_ps *s,int (*sink)(unsigned char),size_t (*space)(v
     while(budget) {
         size_t n,i;unsigned type;
         if(s->payload<s->payload_end) {
-            size_t capacity=space();if(!capacity)return (int)progress;
+            size_t capacity;
+            if(s->stamp_pending) {
+                int rc=s->stamp?s->stamp(s->stamp_context,s->payload_kind,s->payload_kind?s->audio_bytes:s->video_bytes,s->timestamp):1;
+                if(rc<0)return fail(s,"MPEG timestamp receiver rejected packet.");
+                if(!rc)return (int)progress;
+                s->stamp_pending=0;
+            }
+            capacity=s->payload_kind?s->audio_space(s->audio_context):space();if(!capacity)return (int)progress;
             n=s->payload_end-s->payload;if(n>capacity)n=capacity;if(n>budget)n=budget;
-            for(i=0;i<n;++i) if(!sink(s->packet[s->payload++])) return fail(s,"Elementary MPEG input rejected.");
-            s->video_bytes+=n;budget-=(unsigned)n;progress=1;
+            for(i=0;i<n;++i) {
+                unsigned char c=s->packet[s->payload];
+                int rc=s->payload_kind?s->audio_byte(s->audio_context,c):sink(c);
+                if(!rc)return fail(s,"Elementary MPEG input rejected.");
+                ++s->payload;
+            }
+            if(s->payload_kind)s->audio_bytes+=n;else s->video_bytes+=n;budget-=(unsigned)n;progress=1;
             if(s->payload<s->payload_end) return 1;
             s->payload=s->payload_end=s->packet_size=0;
         }
@@ -76,9 +107,9 @@ int xf_video_ps_tick(xf_video_ps *s,int (*sink)(unsigned char),size_t (*space)(v
         n=6+at(s,4)*256+at(s,5);
         if(s->count<n)break;
         /* Account input parsing as bounded work even for non-video packets. */
-        if(type==0xe0) {
+        if(type==0xe0 || (type==0xc0 && s->audio_byte && s->audio_space)) {
             for(i=0;i<n;++i)s->packet[i]=(unsigned char)at(s,i);
-            s->packet_size=n;consume(s,n);++s->packets;progress=1;--budget;
+            s->packet_size=n;consume(s,n);if(type==0xc0)++s->audio_packets;else ++s->packets;progress=1;--budget;
             if(pes(s,type,n-6)<0)return -1;
         } else {consume(s,n);progress=1;--budget;}
     }

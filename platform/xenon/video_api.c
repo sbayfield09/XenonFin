@@ -9,8 +9,8 @@ int xf_video_profile(char *out,size_t cap,const char *user) {
     int n;if(!xf_music_id(user))return 0;
     n=snprintf(out,cap,"{\"UserId\":\"%s\",\"IsPlayback\":true,\"AutoOpenLiveStream\":false,\"StartTimeTicks\":0,"
         "\"EnableDirectPlay\":false,\"EnableDirectStream\":false,\"EnableTranscoding\":true,\"AllowVideoStreamCopy\":false,\"AllowAudioStreamCopy\":false,"
-        "\"MaxStreamingBitrate\":3000000,\"DeviceProfile\":{\"Name\":\"XenonFin MPEG1 silent\",\"MaxStreamingBitrate\":3000000,"
-        "\"DirectPlayProfiles\":[],\"TranscodingProfiles\":[{\"Type\":\"Video\",\"Container\":\"mpeg\",\"Protocol\":\"http\",\"VideoCodec\":\"mpeg1video\",\"AudioCodec\":\"mp2\",\"MaxAudioChannels\":\"2\",\"Context\":\"Streaming\"}],"
+        "\"MaxStreamingBitrate\":3000000,\"DeviceProfile\":{\"Name\":\"XenonFin MPEG1 MP3 A-V\",\"MaxStreamingBitrate\":3000000,"
+        "\"DirectPlayProfiles\":[],\"TranscodingProfiles\":[{\"Type\":\"Video\",\"Container\":\"mpeg\",\"Protocol\":\"http\",\"VideoCodec\":\"mpeg1video\",\"AudioCodec\":\"mp3\",\"MaxAudioChannels\":\"2\",\"Context\":\"Streaming\"}],"
         "\"CodecProfiles\":[{\"Type\":\"Video\",\"Codec\":\"mpeg1video\",\"Conditions\":["
         "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\",\"Value\":\"720\"},"
         "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\",\"Value\":\"480\"},"
@@ -44,18 +44,25 @@ int xf_video_source_parse(const xf_response *response,const char *item,const cha
                 if(field(entries[j],"VideoRangeType",range,sizeof(range)) && strcmp(range,"SDR")) {video=-1;break;}
                 if(field(entries[j],"VideoRange",range,sizeof(range)) && strcmp(range,"SDR")) {video=-1;break;}
                 video=1;
-            } else if(!strcmp(type,"Audio")) field(entries[j],"Codec",out->audio_codec,sizeof(out->audio_codec));
+            } else if(!strcmp(type,"Audio") && !out->has_audio) {
+                field(entries[j],"Codec",out->audio_codec,sizeof(out->audio_codec));
+                out->audio_index=(unsigned)number(entries[j],"Index");out->has_audio=1;
+            }
         }
-        if(video!=1 || out->video_index>255)continue;
+        if(video!=1 || out->video_index>255 || out->audio_index>255)continue;
         snprintf(out->source_id,sizeof(out->source_id),"%s",source);snprintf(out->session_id,sizeof(out->session_id),"%s",session);
         /* Documented progressive endpoint. Never use Static=true/original or
          * an arbitrary returned URL. Tokens stay exclusively in auth headers. */
         {
             int rc=snprintf(out->path,sizeof(out->path),"/Videos/%s/stream.mpeg?Static=false&MediaSourceId=%s&DeviceId=%s&PlaySessionId=%s"
-                "&VideoCodec=mpeg1video&VideoStreamIndex=%u&AudioCodec=mp2&AudioBitRate=64000&MaxAudioChannels=2&SubtitleStreamIndex=-1"
+                "&VideoCodec=mpeg1video&VideoStreamIndex=%u&AudioCodec=mp3&AudioBitRate=128000&AudioSampleRate=48000&MaxAudioChannels=2&SubtitleStreamIndex=-1"
                 "&EnableAutoStreamCopy=false&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false"
                 "&MaxWidth=720&MaxHeight=480&Framerate=30&VideoBitRate=2500000&RequireNonAnamorphic=true",item,source,device,session,out->video_index);
             if(rc<0 || (size_t)rc>=sizeof(out->path))break;
+            if(out->has_audio) {
+                int added=snprintf(out->path+rc,sizeof(out->path)-(size_t)rc,"&AudioStreamIndex=%u",out->audio_index);
+                if(added<0 || (size_t)added>=sizeof(out->path)-(size_t)rc)break;
+            }
         }
         out->sources=(unsigned)count;out->transcoding=1;return 1;
     }

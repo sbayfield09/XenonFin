@@ -103,8 +103,15 @@ static uint64_t clock_update(xf_video *v) {
     uint64_t now=v->backend.microseconds(v->backend.context);
     if(now<v->last_clock_us) { ++v->clock_faults; now=v->last_clock_us; }
     v->last_clock_us=now;
-    if(v->clock_started && !v->paused && !v->buffering) v->timeline_us=v->origin_pts+now-v->origin_us-v->paused_us;
+    if(v->master_clock) {
+        uint64_t position=0;v->master_wait=!v->master_clock(v->master_context,&position);
+        if(!v->master_wait && position>=v->timeline_us)v->timeline_us=position;
+    }
+    else if(v->clock_started && !v->paused && !v->buffering) v->timeline_us=v->origin_pts+now-v->origin_us-v->paused_us;
     return now;
+}
+void xf_video_master(xf_video *v,int (*clock)(void *,uint64_t *),void *context) {
+    v->master_clock=clock;v->master_context=context;v->master_wait=clock!=NULL;
 }
 static void buffering(xf_video *v,int hold) {
     int was=v->paused || v->buffering;clock_update(v);
@@ -134,6 +141,7 @@ static int display_ready(xf_video *v) {
     clock_update(v);
     if(!v->pending || !v->ready || v->paused) return 1;
     if(v->buffering) {if(!v->eof && v->count<XF_VIDEO_QUEUE)return 1;buffering(v,0);clock_update(v);}
+    if(v->master_clock && (v->master_wait || v->pending_pts>v->timeline_us))return 1;
     if(!v->clock_started) {
         if(!v->eof && v->count<XF_VIDEO_QUEUE) return 1;
     } else if(v->pending_pts>v->timeline_us) return 1;
@@ -148,7 +156,7 @@ static int display_ready(xf_video *v) {
     if(!v->backend.present(v->backend.context,v->message,sizeof(v->message))) {fail_reason(v,v->message,XF_DROP_GPU);return 0;}
     after=v->backend.microseconds(v->backend.context); v->pending_work_us+=after-before;v->pending_span_us+=after-before;
     if(!v->clock_started) {
-        v->clock_started=1;v->paused_us=0;v->origin_us=after;v->origin_pts=v->pending_pts;v->timeline_us=v->pending_pts;
+        v->clock_started=1;v->paused_us=0;v->origin_us=after;v->origin_pts=v->pending_pts;if(!v->master_clock)v->timeline_us=v->pending_pts;
         v->last_clock_us=after;v->fps_at=(uint32_t)(after/1000);
     } else clock_update(v);
     v->drift_us=(int64_t)v->timeline_us-(int64_t)v->pending_pts;
@@ -286,7 +294,8 @@ unsigned xf_video_wait_us(const xf_video *v) {
     now=v->backend.microseconds(v->backend.context);
     if(v->streaming && v->input_wait)return 1000;
     if(v->buffering)return 1000;
-    timeline=v->clock_started?v->origin_pts+now-v->origin_us-v->paused_us:0;
+    timeline=v->master_clock?v->timeline_us:v->clock_started?v->origin_pts+now-v->origin_us-v->paused_us:0;
+    if(v->master_wait)return 1000;
     if(v->pending && v->ready && v->clock_started) {
         if(v->pending_pts<=timeline) return v->sync.mode && !v->sync.fallbacks?500:0;
         remaining=v->pending_pts-timeline;
@@ -304,7 +313,7 @@ int xf_video_export(const xf_video *v, const char *path) {
     static const char *names[]={"late","overflow","decode","gpu","eos","present"};
     if(xf_video_active(v)) return 0;
     f=fopen(path,"wb");if(!f) return 0;
-    fprintf(f,"# version=0.6,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
+    fprintf(f,"# version=0.7,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
         v->sync.mode,(unsigned long long)v->late_threshold_us,v->decoded,v->rendered,v->dropped,v->cancelled,v->trace_overwritten);
     fprintf(f,"# proc_avg_us=%llu,proc_p95_us=%llu,proc_max_us=%llu,drift_us=%lld,vsync_wait_us=%llu\n",
         (unsigned long long)(v->processing.count?v->processing.sum/v->processing.count:0),
