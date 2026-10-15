@@ -14,6 +14,7 @@ typedef struct {
     size_t (*receive_space)(void *);
     void *stream_context;
     int streaming, backpressure;
+    int last_receive_result; unsigned receive_calls,eof_seen;
 } xf_http_client;
 void xf_http_init(xf_http_client *);
 int xf_http_begin(xf_http_client *, const xf_endpoint *, const char *device,

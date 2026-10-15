@@ -25,6 +25,14 @@ static void emit(xf_audio_decoder *d, int left, int right) {
 }
 static void convert(xf_audio_decoder *d, int frames, unsigned channels) {
     int i;
+    /* Requested movie format already equals the hardware rate. Avoid two
+     * signed 64-bit interpolation divisions per sample on 32-bit PowerPC.
+     * At phase==48000 the old interpolator is exactly the identity. */
+    if(d->rate==48000) {
+        for(i=0;i<frames;++i)emit(d,d->samples[i*channels],d->samples[i*channels+(channels==2)]);
+        if(frames) {d->previous[0]=d->samples[(frames-1)*channels];d->previous[1]=d->samples[(frames-1)*channels+(channels==2)];d->have_previous=1;d->phase=48000;}
+        d->source_frames+=(unsigned)frames;return;
+    }
     for (i = 0; i < frames; ++i) {
         int left = d->samples[i * channels], right = d->samples[i * channels + (channels == 2)];
         if (!d->have_previous) { emit(d, left, right); d->phase = d->rate; d->have_previous = 1; }

@@ -13,8 +13,8 @@ static uint64_t micro,ready_at,pending_pts,last_pts,last_display,first_display;
 static unsigned calls,frames,submissions,displays,begins,ends,blocked,mode,stream_gate,available_frames;
 static unsigned decode_cost=600,prepare_cost=100,gpu_cost,copy_cost,variable_decode;
 static double fps=25;
-static uint64_t master_position;
-static int master(void *p,uint64_t *us){(void)p;*us=master_position;return 1;}
+static uint64_t master_position;static int master_ready=1;
+static int master(void *p,uint64_t *us){(void)p;*us=master_position;return master_ready;}
 static int open_codec(unsigned char *data,size_t size,xf_video_info *info,char *error,size_t cap) {
     (void)data;(void)size;(void)error;(void)cap; calls=0;
     info->width=info->height=16;info->fps=fps;info->pixel_aspect=1; return 1;
@@ -61,7 +61,7 @@ static void tick(void) { xf_video_tick(&player,(uint32_t)(micro/1000)); }
 static void step(unsigned wait) { tick(); micro+=wait; }
 static void reset(unsigned count) {
     xf_video_stop(&player); xf_video_init(&player,&codec);frames=count;submissions=displays=begins=ends=blocked=mode=0;
-    last_pts=last_display=0;micro=0;fps=25;variable_decode=stream_gate=available_frames=0;decode_cost=600;prepare_cost=100;gpu_cost=copy_cost=0;
+    last_pts=last_display=0;micro=0;fps=25;master_ready=1;variable_decode=stream_gate=available_frames=0;decode_cost=600;prepare_cost=100;gpu_cost=copy_cost=0;
 }
 static void pixels_test(void) {
     /* Independently published limited BT.601 vectors for known RGB patches.
@@ -228,6 +228,16 @@ int main(void) {
         CHECK(player.rendered==i+1 && player.last_present_pts==master_position && !player.dropped);
     }
     CHECK(player.state==XF_VIDEO_ENDED);
+    /* Reproduce 0.7 circular recovery: DMA drained two ms before a
+     * pending deadline, queue depleted. Decode must proceed while held,
+     * even though normal deadline slack is smaller than decode budget. */
+    reset(30);fps=30;master_position=0;
+    CHECK(xf_video_start_network(&player,&backend));xf_video_master(&player,master,NULL);
+    for(i=0;i<30;++i)step(1000);
+    CHECK(player.pending && player.pending_pts==33333 && player.count==XF_VIDEO_QUEUE);
+    player.count=0;master_position=31333;xf_video_service(&player);master_ready=0;before=calls;
+    tick();CHECK(calls==before+1);CHECK(player.count==1 && player.timeline_us==31333 && player.master_wait);
+    master_ready=1;master_position=33333;tick();CHECK(player.last_present_pts==33333);
     reset(5000);fps=30;decode_cost=100;prepare_cost=10;
     CHECK(xf_video_start(&player,filename,&backend));
     for(i=0;i<100000 && player.state!=XF_VIDEO_ENDED;++i) {tick();micro+=xf_video_wait_us(&player);}

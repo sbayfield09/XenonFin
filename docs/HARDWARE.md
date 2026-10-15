@@ -1,5 +1,10 @@
 # Xbox 360 acceptance checklist
 
+## Native 0.7.1 recovery update
+
+Real Xbox testing found 0.7 A/V stutter and an application-generated stall/error. Version 0.7.1 fixes a deterministic frozen-master/full-video-preroll dependency, prioritises cooperative PCM refills, retains buffer capacities, and adds A/B/C comparison modes plus DMA/HTTP/PTS/stage diagnostics. [Exact cause, controls, ten-minute acceptance and test evidence](NATIVE_AV_071.md). Hardware acceptance remains pending; historical host results below cannot establish physical sound or A/V synchronisation.
+
+
 **User-reported version 0.3 results:** XeLL launch, graphics/controller, audio diagnostics, Ethernet/HTTP, authentication, library discovery, movie pagination and metadata/details work on a real console. Version 0.4 adds a native MP3 pipeline, controls and reporting; **the user has now confirmed actual MP3 music works on Xbox in 0.4**. The user has since confirmed the text flicker fix. The user has now confirmed MPEG-1 decoding and CPU/GPU video in 0.5, with initially incorrect CPU colours and frame drops. The user confirmed corrected colours in 0.5.1; at 720×480/30 it presents 218/240 frames. **The user confirmed 0.5.2 at 720×480/30: 240 decoded, 240 displayed, zero drops.** [0.6 streaming acceptance](NATIVE_VIDEO_STREAMING.md) is pending. See [NATIVE_MUSIC.md](NATIVE_MUSIC.md) for the six core music test steps and fault checks. Record console model, output route, video mode, source revision, server version and track format. Video/artwork rows remain future targets.
 
 | Check | Expected behavior | Status |

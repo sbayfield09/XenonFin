@@ -42,7 +42,7 @@ static int pes(xf_video_ps *s,unsigned type,size_t length) {
         else return fail(s,"Invalid MPEG-1 PES flags.");
         if(off>end) return fail(s,"Truncated PES timestamp.");
     }
-    if(!pts && s->stamp && !(s->payload_kind?s->have_audio_pts:s->have_video_pts))
+    if(!pts && !s->optional_initial_pts && s->stamp && !(s->payload_kind?s->have_audio_pts:s->have_video_pts))
         return fail(s,"Missing initial audio/video PTS; cannot establish A/V alignment.");
     if(pts) {
         if(!(p[pts]&1) || !(p[pts+2]&1) || !(p[pts+4]&1)) return fail(s,"Invalid PES timestamp markers.");
@@ -58,6 +58,7 @@ static int pes(xf_video_ps *s,unsigned type,size_t length) {
         }
         if(s->payload_kind && !s->have_audio_pts){s->first_audio_pts=s->timestamp;s->have_audio_pts=1;}
         if(!s->payload_kind && !s->have_video_pts){s->first_video_pts=s->timestamp;s->have_video_pts=1;}
+        if(s->payload_kind)s->last_audio_pts=s->timestamp;else s->last_video_pts=s->timestamp;
         s->stamp_pending=1;
     }
     if(off==end)return fail(s,"Empty MPEG elementary payload.");
@@ -76,11 +77,11 @@ int xf_video_ps_tick(xf_video_ps *s,int (*sink)(unsigned char),size_t (*space)(v
                 if(!rc)return (int)progress;
                 s->stamp_pending=0;
             }
-            capacity=s->payload_kind?s->audio_space(s->audio_context):space();if(!capacity)return (int)progress;
+            capacity=s->payload_kind?s->audio_space(s->audio_context):s->discard_video?65542:space();if(!capacity)return (int)progress;
             n=s->payload_end-s->payload;if(n>capacity)n=capacity;if(n>budget)n=budget;
             for(i=0;i<n;++i) {
                 unsigned char c=s->packet[s->payload];
-                int rc=s->payload_kind?s->audio_byte(s->audio_context,c):sink(c);
+                int rc=s->payload_kind?s->audio_byte(s->audio_context,c):s->discard_video?1:sink(c);
                 if(!rc)return fail(s,"Elementary MPEG input rejected.");
                 ++s->payload;
             }

@@ -54,11 +54,12 @@ static err_t connected(void *arg, struct tcp_pcb *pcb, err_t err) {
 static err_t received(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
     xf_http_client *c = (xf_http_client *)arg;
     struct pbuf *part;
+    c->last_receive_result=err;++c->receive_calls;if(!p)c->eof_seen=1;
     if (p) {
         /* ERR_MEM transfers no ownership and acknowledges no bytes. lwIP retains
          * and retries this exact pbuf, including when playback is paused. */
         if (c->streaming && !c->done && err == ERR_OK && c->receive_space(c->stream_context) < p->tot_len) {
-            c->backpressure = 1; return ERR_MEM;
+            c->backpressure = 1; c->last_receive_result=ERR_MEM;return ERR_MEM;
         }
         c->backpressure = 0;
         c->received_size += p->tot_len;

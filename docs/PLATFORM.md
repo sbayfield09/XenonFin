@@ -1,5 +1,10 @@
 # Platform investigation and implementation boundary
 
+## Native 0.7.1 recovery update
+
+Real Xbox testing found 0.7 A/V stutter and an application-generated stall/error. Version 0.7.1 fixes a deterministic frozen-master/full-video-preroll dependency, prioritises cooperative PCM refills, retains buffer capacities, and adds A/B/C comparison modes plus DMA/HTTP/PTS/stage diagnostics. [Exact cause, controls, ten-minute acceptance and test evidence](NATIVE_AV_071.md). Hardware acceptance remains pending; historical host results below cannot establish physical sound or A/V synchronisation.
+
+
 **0.7 update:** user-confirmed 0.6 real Jellyfin streaming/GPU MPEG-1 at approximately 720×414/30, zero drops. Native 0.7 adds MPEG-PS MP3 extraction, existing minimp3/PCM conversion and an actual DMA-consumption master for the preserved video scheduler. [NATIVE_AV.md](NATIVE_AV.md) documents architecture and pending physical sound/sync acceptance. It uses the same toolchain; there is no new XDK, codec port or hardware pause assumption. Earlier release status below is historical.
 
 **0.6 status:** the user confirmed 0.5.2 local 720×480/30 video at **240/240 frames, zero drops**, completing the initial local-video prerequisite. Native 0.6 adds Jellyfin MPEG-1/MPEG-PS negotiation, bounded incremental HTTP/PES input, controls and reports, and reuses that decoder/scheduler/renderer. Real Jellyfin host/API/decoder and cross-build evidence is documented in [NATIVE_VIDEO_STREAMING.md](NATIVE_VIDEO_STREAMING.md); streamed Xbox pictures and five-minute console stability remain pending. No movie audio/HD codec/artwork was added. Earlier investigation details below are retained as history.

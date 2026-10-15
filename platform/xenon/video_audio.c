@@ -86,7 +86,7 @@ int xf_av_audio_clock(void *context,uint64_t *us) {
     played=a->submitted> a->queued/4?a->submitted-a->queued/4:0;
     if(played>a->played)a->played=played;
     *us=a->played*1000000/48000;
-    return a->started && !a->failed;
+    return a->started && !a->failed && !(a->rebuffering && !a->queued);
 }
 void xf_av_audio_output(xf_av_audio *a,int allow,int video_ready,int tail) {
     unsigned budget;uint64_t us;

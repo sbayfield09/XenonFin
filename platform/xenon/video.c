@@ -105,7 +105,7 @@ static uint64_t clock_update(xf_video *v) {
     v->last_clock_us=now;
     if(v->master_clock) {
         uint64_t position=0;v->master_wait=!v->master_clock(v->master_context,&position);
-        if(!v->master_wait && position>=v->timeline_us)v->timeline_us=position;
+        if(position>=v->timeline_us)v->timeline_us=position;
     }
     else if(v->clock_started && !v->paused && !v->buffering) v->timeline_us=v->origin_pts+now-v->origin_us-v->paused_us;
     return now;
@@ -140,10 +140,10 @@ static int display_ready(xf_video *v) {
     uint64_t before,after,late;
     clock_update(v);
     if(!v->pending || !v->ready || v->paused) return 1;
-    if(v->buffering) {if(!v->eof && v->count<XF_VIDEO_QUEUE)return 1;buffering(v,0);clock_update(v);}
+    if(v->buffering) {if(!v->master_clock && !v->eof && v->count<XF_VIDEO_QUEUE)return 1;buffering(v,0);clock_update(v);}
     if(v->master_clock && (v->master_wait || v->pending_pts>v->timeline_us))return 1;
     if(!v->clock_started) {
-        if(!v->eof && v->count<XF_VIDEO_QUEUE) return 1;
+        if(!v->master_clock && !v->eof && v->count<XF_VIDEO_QUEUE) return 1;
     } else if(v->pending_pts>v->timeline_us) return 1;
     if(v->count && obsolete(v,v->pending_pts,v->queue[v->head].pts)) {
         record(v,v->pending_pts,v->pending_work_us,XF_DROP_LATE); v->pending=v->ready=0;
@@ -212,7 +212,7 @@ void xf_video_service(xf_video *v) {
 }
 static int slack(xf_video *v, uint64_t budget) {
     clock_update(v);
-    if(!v->clock_started || !v->pending || v->buffering) return 1;
+    if(!v->clock_started || !v->pending || v->buffering || v->master_wait) return 1;
     return v->pending_pts>v->timeline_us && v->pending_pts-v->timeline_us>budget;
 }
 int xf_video_ui_safe(xf_video *v) {
@@ -313,7 +313,7 @@ int xf_video_export(const xf_video *v, const char *path) {
     static const char *names[]={"late","overflow","decode","gpu","eos","present"};
     if(xf_video_active(v)) return 0;
     f=fopen(path,"wb");if(!f) return 0;
-    fprintf(f,"# version=0.7,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
+    fprintf(f,"# version=0.7.1,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
         v->sync.mode,(unsigned long long)v->late_threshold_us,v->decoded,v->rendered,v->dropped,v->cancelled,v->trace_overwritten);
     fprintf(f,"# proc_avg_us=%llu,proc_p95_us=%llu,proc_max_us=%llu,drift_us=%lld,vsync_wait_us=%llu\n",
         (unsigned long long)(v->processing.count?v->processing.sum/v->processing.count:0),

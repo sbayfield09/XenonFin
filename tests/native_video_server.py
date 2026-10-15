@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--long', action='store_true', help='also decode a five-minute movie in real time on the HOST')
+    parser.add_argument('--long-seconds', type=int, default=300, choices=range(60, 601), metavar='60..600', help='host long-run duration; default 300, maximum 600 seconds')
     parser.add_argument('--extended', action='store_true', help='test video-only, delayed/short audio, long pause, network stall and slow device clock')
     parser.add_argument('--case', help='run only cases whose label contains this text')
     parser.add_argument('--metrics', type=Path, help='write safe structured host test evidence')
@@ -40,8 +41,7 @@ def main():
                         '-t', '8', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', str(clip)], check=True)
         season = work/'tv/Native Series/Season 01'
         season.mkdir(parents=True)
-        # Same moving video, but real 5.1 AAC: MP2 output must be downmixed
-        # even though the console discards audio packets for this stage.
+        # Same moving video, with real 5.1 AAC downmixed to decoded MP3 stereo.
         subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-i', str(clip),
                         '-c:v', 'copy', '-ac', '6', '-c:a', 'aac',
                         str(season/'Native Series S01E01.mp4')], check=True)
@@ -59,7 +59,7 @@ def main():
             subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-i', str(clip), '-filter_complex', '[0:a]atrim=duration=5[a]', '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', str(work/'movies/Short Audio.mp4')], check=True)
         if args.long:
             subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-stream_loop', '-1', '-i', str(clip),
-                            '-t', '300', '-c:v', 'copy', '-af', 'aresample=async=1:first_pts=0', '-c:a', 'aac', '-ar', '48000', str(work/'movies/Long Stream.mp4')], check=True)
+                            '-t', str(args.long_seconds), '-c:v', 'copy', '-af', 'aresample=async=1:first_pts=0', '-c:a', 'aac', '-ar', '48000', str(work/'movies/Long Stream.mp4')], check=True)
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
@@ -117,10 +117,10 @@ def main():
                 if args.extended:
                     for name, label in [('Video Only', 'silent source fallback'), ('Delayed Audio', 'positive audio PTS offset'), ('Short Audio', 'hardware-clocked silent video tail'), ('Gapped Audio', 'timestamp-gapped source PCM placement')]:
                         cases.append((next(i for i in indexed if i['Name'] == name), '--audio-gap' if name == 'Gapped Audio' else '--audio-tail' if name == 'Short Audio' else '', label))
-                    cases.extend([(movie, '--pause-long', '20-second pause/backpressure'), (movie, '--stall', '5-second network interruption/rebuffer'), (movie, '--slow-audio', '46 kHz simulated device vs 48 kHz media clock')])
+                    cases.extend([(movie, '--mode-a', 'mode A same audio-bearing stream/video only'), (movie, '--mode-b', 'mode B same stream/audio only'), (movie, '--console-cost', 'console-cost cooperative decode and GPU'), (movie, '--recovery', 'console-cost forced DMA recovery'), (movie, '--pause-long', '20-second pause/backpressure'), (movie, '--stall', '5-second network interruption/rebuffer'), (movie, '--slow-audio', '46 kHz simulated device vs 48 kHz media clock')])
                 if args.long:
                     long_movie = next(i for i in indexed if i['Type'] == 'Movie' and i['Name'] == 'Long Stream')
-                    cases.append((long_movie, '', 'five-minute media/realtime HOST clock'))
+                    cases.append((long_movie, '', f'long-duration {args.long_seconds}-second media/realtime HOST clock'))
                 if args.case:
                     cases = [case for case in cases if args.case in case[2]]
                     if not cases:
@@ -129,19 +129,21 @@ def main():
                 for item, flag, label in cases:
                     command = [str(probe), base, item['Id']]+([flag] if flag else [])
                     result = subprocess.run(command, env={**env, 'JELLYFIN_ACCESS_TOKEN': token, 'JELLYFIN_USER_ID': user},
-                                            capture_output=True, text=True, timeout=420)
+                                            capture_output=True, text=True, timeout=max(420,args.long_seconds+120))
                     if token in result.stdout+result.stderr or password in result.stdout+result.stderr:
                         raise RuntimeError('Secret appeared in probe output')
                     if result.returncode:
                         raise RuntimeError('Native video probe failed: '+result.stderr.strip())
                     metrics = json.loads(result.stdout)
                     if args.long and item.get('Name') == 'Long Stream':
-                        assert metrics['decoded'] >= 8990 and metrics['received'] > 8*1024*1024, metrics
+                        assert metrics['decoded'] >= args.long_seconds*30-10 and metrics['received'] > 8*1024*1024, metrics
                     elif flag == '--audio-gap':
                         assert metrics['decoded'] >= 480 and metrics['gap_events'] > 0, metrics
                     elif not flag or flag == '--accelerated':
                         assert metrics['decoded'] == 240, metrics
-                    assert metrics['reports_204'] and metrics['cleaned'] and metrics['moving_rgb_frames'] > 20, metrics
+                    assert metrics['reports_204'] and metrics['cleaned'], metrics
+                    if flag != '--mode-b':
+                        assert metrics['moving_rgb_frames'] > 20, metrics
                     if flag == '--sync':
                         assert metrics['sync_flashes'] == metrics['sync_beeps'] == 8, metrics
                     if metrics['audio_expected']:
@@ -152,7 +154,7 @@ def main():
                     if args.metrics:
                         args.metrics.write_text(json.dumps({'server': info['Version'], 'physical_xbox_tested': False, 'runs': evidence}, indent=2)+'\n')
                     print(label+': '+json.dumps(metrics), flush=True)
-                print('Real Jellyfin '+info['Version']+' MPEG-1/MP3 PS, decoded PCM, consumption-clock video, flash/beep timing, pause/cancel/reports PASS; Xbox presentation and five-minute console stability PENDING', flush=True)
+                print('Real Jellyfin '+info['Version']+' MPEG-1/MP3 PS, decoded PCM, consumption-clock video, flash/beep timing, pause/cancel/reports PASS; Xbox presentation and ten-minute console stability PENDING', flush=True)
             finally:
                 process.terminate()
                 try:

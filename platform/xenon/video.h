@@ -66,6 +66,8 @@ int xf_video_options(xf_video *, unsigned sync, uint64_t lateness_us);
 int xf_video_export(const xf_video *, const char *path);
 int xf_video_ui_safe(xf_video *);
 void xf_video_service(xf_video *);
+/* Master callback always writes the consumed/held position. Return zero to
+ * hold presentation while allowing decode-ahead (e.g. drained DMA rebuffer). */
 void xf_video_master(xf_video *,int (*)(void *,uint64_t *),void *);
 void xf_video_tick(xf_video *, uint32_t now);
 void xf_video_pause(xf_video *, uint32_t now);

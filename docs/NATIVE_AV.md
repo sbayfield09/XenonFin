@@ -1,4 +1,6 @@
-# XenonFin 0.7 — movie audio and an audio-master clock
+# XenonFin 0.7 — historical movie audio integration
+
+**Hardware testing subsequently found severe stuttering and a recovery deadlock in 0.7. For the current 0.7.1 changes, modes and hardware acceptance, use [NATIVE_AV_071.md](NATIVE_AV_071.md). The host results below do not establish console stability.**
 
 The user confirmed **0.6 on Xbox 360**: real Jellyfin progressive MPEG-PS, MPEG-1 decode, GPU presentation at approximately 30 FPS / 720×414, zero drops. MP3 music output is also hardware-confirmed. Version 0.7 adds movie audio to those components. **The new movie audio and physical A/V synchronisation have not been tested on a console by this environment.** Hearing both sound and pictures is insufficient to establish synchronisation.
 

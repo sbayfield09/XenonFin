@@ -7,7 +7,8 @@ typedef struct {
     unsigned char ring[XF_PS_RING],packet[65542];
     size_t head,count,peak,packet_size,payload,payload_end;
     uint64_t received,video_bytes,packets,pts90k;
-    unsigned ended,failed,seen_pack,eof,have_pts;
+    unsigned ended,failed,seen_pack,eof,have_pts,discard_video,optional_initial_pts;
+    int64_t last_video_pts,last_audio_pts;
     unsigned payload_kind,stamp_pending;
     uint64_t audio_bytes,audio_packets;
     int64_t timestamp,reference_pts,first_video_pts,first_audio_pts;

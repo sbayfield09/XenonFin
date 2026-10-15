@@ -68,5 +68,15 @@ int main(void){
     reset(0);audio.decoder.finished=1;audio.decoder.pcm_size=400;audio.decoder.pcm_read=0;
     xf_av_audio_output(&audio,1,1,0);CHECK(pending==2048 && audio.tail_frames==412 && !xf_av_audio_done(&audio));pending=0;CHECK(xf_av_audio_done(&audio));
     reset(0);pending=65537;CHECK(!xf_av_audio_clock(&audio,&position) && audio.failed);
+    /* Counters cross 32-bit sample and repeated 64 KiB hardware ring wraps.
+     * Empty software PCM does not affect the consumed-sample calculation. */
+    reset(0);audio.started=1;audio.submitted=(1ULL<<33)+2048;audio.played=(1ULL<<33);pending=8192;audio.decoder.pcm_size=0;
+    CHECK(xf_av_audio_clock(&audio,&position) && position==(1ULL<<33)*1000000/48000);
+    pending=4096;CHECK(xf_av_audio_clock(&audio,&position) && audio.played==(1ULL<<33)+1024);
+    pending=6144;CHECK(xf_av_audio_clock(&audio,&position) && audio.played==(1ULL<<33)+1024); /* stale larger queue cannot reverse time */
+    pending=0;CHECK(xf_av_audio_clock(&audio,&position) && audio.played==audio.submitted);
+    for(i=0;i<500;++i)CHECK(xf_av_audio_clock(&audio,&position) && audio.played==audio.submitted);
+    audio.rebuffering=1;CHECK(!xf_av_audio_clock(&audio,&position) && position==audio.submitted*1000000/48000);
+    xf_av_audio_init(&audio,NULL);CHECK(!audio.played && !audio.submitted && !audio.started);
     puts("Native movie audio DMA consumption clock, exact offset silence/trim, pause/rebuffer, PTS and codec rejection PASS");return 0;
 }
