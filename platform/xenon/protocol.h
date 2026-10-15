@@ -40,16 +40,17 @@ typedef struct {
     char body[XF_BODY_LIMIT + 1];
     char line[256];
     char error[128];
-    size_t header_size, body_size, line_size, remaining, trailer_size;
+    size_t header_size, body_size, line_size, trailer_size;
+    uint64_t remaining, streamed;
     int status, headers_done, complete, failed, chunked, has_length, phase;
-    size_t body_limit;
+    uint64_t body_limit;
     int (*sink)(void *, unsigned char);
     void *sink_context;
     char content_type[80];
 } xf_response;
 
 void xf_response_init(xf_response *);
-void xf_response_stream(xf_response *, int (*sink)(void *, unsigned char), void *, size_t limit);
+void xf_response_stream(xf_response *, int (*sink)(void *, unsigned char), void *, uint64_t limit);
 void xf_response_feed(xf_response *, const void *, size_t);
 void xf_response_eof(xf_response *);
 int xf_public_info(const xf_response *, char *server, size_t, char *version, size_t);

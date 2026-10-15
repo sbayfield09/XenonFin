@@ -51,3 +51,7 @@ native-video-test: native-test
 .PHONY: video-benchmarks
 video-benchmarks:
 	bash scripts/make_video_benchmarks.sh
+
+.PHONY: native-video-stream-test
+native-video-stream-test: native-test
+	python3 tests/native_video_server.py

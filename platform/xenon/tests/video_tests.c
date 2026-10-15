@@ -10,7 +10,7 @@ static unsigned checks;
 static xf_video player;
 static unsigned char source[480];
 static uint64_t micro,ready_at,pending_pts,last_pts,last_display,first_display;
-static unsigned calls,frames,submissions,displays,begins,ends,blocked,mode;
+static unsigned calls,frames,submissions,displays,begins,ends,blocked,mode,stream_gate,available_frames;
 static unsigned decode_cost=600,prepare_cost=100,gpu_cost,copy_cost,variable_decode;
 static double fps=25;
 static int open_codec(unsigned char *data,size_t size,xf_video_info *info,char *error,size_t cap) {
@@ -19,6 +19,7 @@ static int open_codec(unsigned char *data,size_t size,xf_video_info *info,char *
 }
 static int next_codec(xf_video_image *image,char *error,size_t cap) {
     if(calls==frames) return 0;
+    if(stream_gate && calls>=available_frames)return 2;
     if(mode==4) {snprintf(error,cap,"decoder fault");return -1;}
     memset(source,(int)(calls%200+16),sizeof(source));
     image->width=image->height=16;image->y=source;image->cb=source+320;image->cr=source+400;
@@ -58,7 +59,7 @@ static void tick(void) { xf_video_tick(&player,(uint32_t)(micro/1000)); }
 static void step(unsigned wait) { tick(); micro+=wait; }
 static void reset(unsigned count) {
     xf_video_stop(&player); xf_video_init(&player,&codec);frames=count;submissions=displays=begins=ends=blocked=mode=0;
-    last_pts=last_display=0;micro=0;fps=25;variable_decode=0;decode_cost=600;prepare_cost=100;gpu_cost=copy_cost=0;
+    last_pts=last_display=0;micro=0;fps=25;variable_decode=stream_gate=available_frames=0;decode_cost=600;prepare_cost=100;gpu_cost=copy_cost=0;
 }
 static void pixels_test(void) {
     /* Independently published limited BT.601 vectors for known RGB patches.
@@ -194,6 +195,25 @@ int main(void) {
     xf_video_pause(&player,0);micro+=1000000;tick();xf_video_pause(&player,0);
     for(i=0;i<1000 && player.state!=XF_VIDEO_ENDED;++i) {tick();micro+=xf_video_wait_us(&player);}
     CHECK(player.rendered==10 && !player.dropped && player.timeline_us<500000);
+    /* Incremental input waits are not EOF. Exclude startup, rebuffer and
+     * overlapping user pause exactly once from the absolute clock. */
+    reset(40);fps=30;stream_gate=1;available_frames=0;
+    CHECK(xf_video_start_network(&player,&backend));
+    for(i=0;i<200;++i)step(10000);
+    CHECK(player.buffering && !player.clock_started && !player.rendered && !player.eof);
+    available_frames=8;
+    for(i=0;i<400 && !player.underruns;++i)step(1000);
+    CHECK(player.rendered==8 && player.buffering && player.underruns==1);
+    frozen=player.timeline_us;
+    for(i=0;i<100;++i)step(10000);
+    CHECK(player.timeline_us==frozen && !player.eof);
+    xf_video_pause(&player,0);available_frames=frames;
+    for(i=0;i<100;++i)step(10000);
+    CHECK(player.timeline_us==frozen && calls==8 && player.paused && player.buffering);
+    xf_video_pause(&player,0);
+    for(i=0;i<3000 && player.state!=XF_VIDEO_ENDED;++i)step(1000);
+    CHECK(player.state==XF_VIDEO_ENDED && player.rendered==40 && !player.dropped && player.underruns==1);
+    CHECK(player.timeline_us<1400000 && player.timeline_us>=1300000 && !player.clock_faults);
     reset(5000);fps=30;decode_cost=100;prepare_cost=10;
     CHECK(xf_video_start(&player,filename,&backend));
     for(i=0;i<100000 && player.state!=XF_VIDEO_ENDED;++i) {tick();micro+=xf_video_wait_us(&player);}

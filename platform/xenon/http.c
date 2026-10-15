@@ -9,8 +9,8 @@ static int equal(const char *a, const char *b) {
     while (*a && *b) if (tolower((unsigned char)*a++) != tolower((unsigned char)*b++)) return 0;
     return !*a && !*b;
 }
-static int number(const char *s, size_t *out, unsigned base, size_t limit) {
-    size_t result = 0;
+static int number(const char *s, uint64_t *out, unsigned base, uint64_t limit) {
+    uint64_t result = 0;
     int digits = 0;
     for (; *s; ++s) {
         unsigned digit;
@@ -64,15 +64,15 @@ static void headers(xf_response *r) {
     if (r->status == 204 || r->status == 304 || (r->has_length && !r->remaining)) r->complete = 1;
 }
 void xf_response_init(xf_response *r) { memset(r, 0, sizeof(*r)); r->body_limit = XF_BODY_LIMIT; }
-void xf_response_stream(xf_response *r, int (*sink)(void *, unsigned char), void *context, size_t limit) {
+void xf_response_stream(xf_response *r, int (*sink)(void *, unsigned char), void *context, uint64_t limit) {
     xf_response_init(r); r->sink = sink; r->sink_context = context; r->body_limit = limit;
 }
 static void body_byte(xf_response *r, unsigned char c) {
-    if (r->body_size >= r->body_limit) { fail(r, r->sink ? "Audio stream exceeds size limit" : "HTTP body exceeds 32 KiB limit"); return; }
+    if ((r->sink?r->streamed:r->body_size) >= r->body_limit) { fail(r, r->sink ? "Media stream exceeds size limit" : "HTTP body exceeds 32 KiB limit"); return; }
     if (r->sink) {
-        if (r->status != 200) { fail(r, "Audio stream HTTP status is not 200"); return; }
-        if (!r->sink(r->sink_context, c)) { fail(r, "Audio receive ring overflow"); return; }
-        ++r->body_size; return;
+        if (r->status != 200) { fail(r, "Media stream HTTP status is not 200"); return; }
+        if (!r->sink(r->sink_context, c)) { fail(r, "Media receive ring overflow"); return; }
+        ++r->streamed;if(r->body_size<SIZE_MAX) ++r->body_size; return;
     }
     r->body[r->body_size++] = (char)c; r->body[r->body_size] = 0;
 }
@@ -108,7 +108,7 @@ void xf_response_feed(xf_response *r, const void *bytes, size_t size) {
                     else if (!strchr(r->line, ':')) fail(r, "Malformed HTTP trailer");
                 } else {
                     extension = strchr(r->line, ';'); if (extension) *extension = 0;
-                    if (!number(r->line, &r->remaining, 16, r->body_limit) || r->remaining > r->body_limit - r->body_size) fail(r, "Invalid/oversized chunk length");
+                    if (!number(r->line, &r->remaining, 16, r->body_limit) || r->remaining > r->body_limit - (r->sink?r->streamed:r->body_size)) fail(r, "Invalid/oversized chunk length");
                     else r->phase = r->remaining ? CHUNK_DATA : CHUNK_TRAILER;
                 }
                 r->line_size = 0;

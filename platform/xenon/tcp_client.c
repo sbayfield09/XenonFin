@@ -138,6 +138,15 @@ int xf_http_audio(xf_http_client *c, const xf_endpoint *ep, const char *device, 
     count = xf_api_request(c->request, sizeof(c->request), ep, device, token, "GET", resource, NULL, 1);
     return begin_transport(c, ep, count, now);
 }
+int xf_http_video(xf_http_client *c,const xf_endpoint *ep,const char *device,const char *token,
+                  const char *resource,int (*sink)(void *,unsigned char),size_t (*space)(void *),void *context,uint32_t now) {
+    int count;xf_http_cancel(c);xf_http_init(c);c->sensitive=1;c->streaming=1;
+    if(!sink || !space) {error(c,0,"Missing video receiver");return 0;}
+    c->receive_space=space;c->stream_context=context;
+    xf_response_stream(&c->response,sink,context,UINT64_MAX);
+    count=xf_api_request(c->request,sizeof(c->request),ep,device,token,"GET",resource,NULL,2);
+    return begin_transport(c,ep,count,now);
+}
 void xf_http_tick(xf_http_client *c, uint32_t now, int ready) {
     if (!c->active) return;
     /* Tick observes receive/ACK activity without depending on a hardware clock in callbacks. */

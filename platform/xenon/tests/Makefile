@@ -37,6 +37,8 @@ $(OUT)/network-tests: network_tests.c ../native_net.c $(COMMON) ../native_net.h 
 $(OUT)/init-tests: init_tests.c ../init_guard.c ../driver_guard.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include init_tests.c ../init_guard.c -o $@
 test: $(OUT)/video-source-tests $(OUT)/video-native-tests $(OUT)/video-tests $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-protocol-tests $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests
+	$(OUT)/jvideo-fault-tests
+	$(OUT)/video-stream-tests
 	$(OUT)/video-source-tests
 	$(OUT)/video-native-tests
 	$(OUT)/video-tests
@@ -72,3 +74,20 @@ $(OUT)/video-native-tests: video_native_tests.c ../video_native.c ../video_pixel
 
 $(OUT)/video-source-tests: video_source_tests.c ../video_source.c ../video_native.h ../video.h ../video_decode.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include video_source_tests.c ../video_source.c -o $@
+
+all: $(OUT)/stream-decode-probe
+$(OUT)/stream-decode-probe: stream_decode_probe.c ../video_ps.c ../video_ps.h ../video_decode.c ../video_decode.h ../timing.h ../third_party/pl_mpeg/pl_mpeg.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) stream_decode_probe.c ../video_ps.c ../video_decode.c -lm -o $@
+
+JVIDEO := ../jvideo.c ../video_api.c ../video_ps.c ../video.c ../video_sync.c ../video_decode.c ../video_pixels.c ../music_api.c ../tcp_client.c $(COMMON)
+all: $(OUT)/jvideo-probe
+$(OUT)/jvideo-probe: jvideo_probe.c posix_tcp.c $(JVIDEO) ../jvideo.h ../video_api.h ../video_ps.h ../video.h ../video_decode.h ../native_net.h ../protocol.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include jvideo_probe.c posix_tcp.c $(JVIDEO) -lm -o $@
+
+all test: $(OUT)/video-stream-tests
+$(OUT)/video-stream-tests: video_stream_tests.c ../video_api.c ../video_ps.c ../music_api.c $(COMMON) ../video_api.h ../video_ps.h $(COMMON_HEADERS) | $(OUT)
+	$(HOST_CC) $(CFLAGS) video_stream_tests.c ../video_api.c ../video_ps.c ../music_api.c $(COMMON) -o $@
+
+all test: $(OUT)/jvideo-fault-tests
+$(OUT)/jvideo-fault-tests: jvideo_fault_tests.c tcp_fake.h $(JVIDEO) ../jvideo.h ../video_api.h ../video_ps.h ../video.h ../video_decode.h ../native_net.h ../protocol.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include jvideo_fault_tests.c $(JVIDEO) -lm -o $@

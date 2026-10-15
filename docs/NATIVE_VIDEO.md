@@ -1,5 +1,7 @@
 # XenonFin 0.5.2 — frame timing and drop diagnosis
 
+**Subsequent hardware result:** the user confirmed 0.5.2 at 720×480/30: **240 decoded, 240 displayed, zero drops**, with correct colours and timing. The notes and pending matrix below describe the original 0.5.2 investigation; every VBlank mode/model is not thereby validated. Current downloads contain 0.6; use [the pinned 0.5.2 revision](https://github.com/sbayfield09/XenonFin/tree/30ecf9bcfbae34deb786ccf9514c593221731e56/dist) to repeat that binary. The working local pipeline is retained in 0.6, now under **Video / local test** with eight stats pages. [0.6 Jellyfin streaming and physical test instructions](NATIVE_VIDEO_STREAMING.md).
+
 The user confirmed corrected CPU colours and working MPEG-1 decoding/GPU rendering on a real Xbox 360 in 0.5.1. At 720×480/30 FPS the reported result was 240 decoded, 218 presented, 22 dropped, 27.23 average FPS, approximately correct clip duration; decode 10.54 ms, upload 1.34 ms, GPU observation approximately 1.39 ms, copy 2.88 ms, VSync off. **0.5.2 fixes verified software defects and adds diagnostics; sustained 30 FPS and its new VBlank modes still require console testing.** Jellyfin login/browsing, MP3/network streaming, audio, controller and the working text/video graphics paths remain in place.
 
 ## Downloads and first hardware comparison

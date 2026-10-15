@@ -11,6 +11,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = Path(os.environ.get('JELLYFIN_VIDEO_PROBE', ROOT / 'build/native-tests/video-probe'))
+STREAM_PROBE = Path(os.environ.get('JELLYFIN_VIDEO_STREAM_DECODE_PROBE', ROOT / 'build/native-tests/stream-decode-probe'))
 
 
 def run(args, **kwargs):
@@ -50,6 +51,14 @@ def main():
             assert hashlib.sha256(a[:frame_size]).digest() != hashlib.sha256(a[-frame_size:]).digest()
             metadata['mean_abs_pixel_error'] = round(mean, 6)
             metadata['max_abs_pixel_error'] = max(differences)
+            # Same codec through incremental PS framing, arbitrary byte splits,
+            # bounded ES ring and EOF drain: all decoded pixels must match.
+            ps, incremental = folder / 'wrapped.mpg', folder / 'incremental.yuv'
+            run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', str(clip),
+                 '-c:v', 'copy', '-f', 'mpeg', '-y', str(ps)])
+            streamed = json.loads(run([str(STREAM_PROBE), str(ps), str(incremental)]).stdout)
+            assert streamed['frames'] == count and incremental.read_bytes() == a, streamed
+            metadata['incremental_ps_frames'] = streamed['frames']
             evidence.append(metadata)
         # Actual compressed RGB patches -> native decoder -> actual CPU tiled
         # converter -> emulated PPC BGRA bytes. Compare to independent FFmpeg.

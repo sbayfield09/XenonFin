@@ -16,11 +16,11 @@ cp build/xenon/xenonfin-boot.elf32 dist/xenonfin-xell-video.elf
 chmod 644 dist/xenonfin-xell-video.elf
 cp build/video-fixtures/xenonfin-test.m1v dist/xenonfin-test.m1v
 cp build/video-fixtures/xenonfin-test.m1v "$stage_dir/xbox-boot-diagnostic/xenonfin-test.m1v"
-cp docs/PLATFORM.md docs/HARDWARE.md docs/THIRD_PARTY.md docs/NATIVE_HTTP.md docs/NATIVE_BROWSING.md docs/NATIVE_MUSIC.md docs/NATIVE_RENDERING.md docs/NATIVE_VIDEO.md docs/LIBXENON_CONSOLE_LICENSE.md docs/LIBFAT_LICENSE.md LICENSE "$stage_dir/xbox-boot-diagnostic/"
+cp docs/PLATFORM.md docs/HARDWARE.md docs/THIRD_PARTY.md docs/NATIVE_HTTP.md docs/NATIVE_BROWSING.md docs/NATIVE_MUSIC.md docs/NATIVE_RENDERING.md docs/NATIVE_VIDEO.md docs/NATIVE_VIDEO_STREAMING.md docs/native-video-streaming-metrics.json docs/LIBXENON_CONSOLE_LICENSE.md docs/LIBFAT_LICENSE.md LICENSE "$stage_dir/xbox-boot-diagnostic/"
 cp platform/xenon/third_party/pl_mpeg/LICENSE "$stage_dir/xbox-boot-diagnostic/PL-MPEG-LICENSE.txt"
 cp platform/xenon/third_party/pl_mpeg/SOURCE.md "$stage_dir/xbox-boot-diagnostic/PL-MPEG-SOURCE.md"
 cp platform/xenon/third_party/minimp3/LICENSE "$stage_dir/xbox-boot-diagnostic/MINIMP3-LICENSE.txt"
-printf '%s\n' 'XenonFin 0.5.2: precise clocks, serial-free UI, frame-drop and VBlank diagnostics. Copy xenon.elf and xenonfin-test.m1v to FAT USB root. Local video test: A CPU reference, Y optional Xenos texture test. 0.5 decoding/CPU/GPU video was confirmed on Xbox; 0.5.1 colours are confirmed; 0.5.2 cadence and VBlank modes still require hardware testing. Up/Down: CPU/GPU known colour bars. L/R: six timing pages. While stopped: LT lateness, RT VSync, right stick saves USB CSV. Working 0.4 music/text sources preserved. See NATIVE_VIDEO.md.' > "$stage_dir/xbox-boot-diagnostic/README.txt"
+printf '%s\n' 'XenonFin 0.6: authenticated Jellyfin movie/episode streaming via MPEG-1/MPEG-PS. Copy xenon.elf to FAT USB root and boot XeLL. Initialise networking, sign in, open movie/episode details in Libraries and press A. A/Start pause, X stop, B return, L/R eight stats pages. Silent console video; server MP2 audio is discarded. See NATIVE_VIDEO_STREAMING.md for server requirements and five-minute hardware tests. New streaming code is host/API tested and cross-built; actual Xbox streaming still needs testing. The user confirmed 0.5.2 local video at 720x480/30 with 240/240 frames. Local regression: xenonfin-test.m1v at USB root, Video / local test A CPU or Y GPU.' > "$stage_dir/xbox-boot-diagnostic/README.txt"
 cp build/xenonfin "$stage_dir/linux-x86_64/"
 strip --strip-unneeded "$stage_dir/linux-x86_64/xenonfin"
 cp README.md LICENSE "$stage_dir/linux-x86_64/"

@@ -50,12 +50,13 @@ typedef struct {
     xf_video_sync sync;
     unsigned ui_frames, loop_count, starved, synthetic;
     uint32_t fps_at, fps_frames;
-    unsigned paused, clock_started, eof, pending, ready, backend_started;
+    unsigned paused, buffering, input_wait, streaming, underruns, clock_started, eof, pending, ready, backend_started;
     enum xf_video_state state;
     char path[128], message[180];
 } xf_video;
 void xf_video_init(xf_video *, const xf_video_codec *);
 int xf_video_start(xf_video *, const char *path, const xf_video_backend *);
+int xf_video_start_network(xf_video *, const xf_video_backend *);
 int xf_video_start_colours(xf_video *, const xf_video_backend *);
 unsigned xf_video_wait_us(const xf_video *);
 int xf_video_options(xf_video *, unsigned sync, uint64_t lateness_us);

@@ -34,7 +34,7 @@ void xf_video_init(xf_video *v, const xf_video_codec *codec) {
     snprintf(v->message,sizeof(v->message),"FAT USB: xenonfin-test.m1v. Up/Down: colour bars. LT late / RT VSync (stopped).");
 }
 void xf_video_stop(xf_video *v) {
-    v->cancelled+=v->count+v->pending;release(v); v->state=XF_VIDEO_IDLE; v->paused=0;
+    v->cancelled+=v->count+v->pending;release(v); v->state=XF_VIDEO_IDLE; v->paused=v->buffering=0;
     snprintf(v->message,sizeof(v->message),"Stopped. R-stick: save CSV; LT: lateness; RT: VSync; B: Libraries.");
 }
 int xf_video_options(xf_video *v, unsigned sync, uint64_t lateness_us) {
@@ -54,7 +54,7 @@ static int begin(xf_video *v) {
     if(!v->backend.present || !v->backend.begin(v->backend.context,&v->info,v->message,sizeof(v->message))) { fail(v,v->message); return 0; }
     v->backend_started=1; v->state=XF_VIDEO_PLAYING;
     v->last_clock_us=v->backend.microseconds(v->backend.context);
-    snprintf(v->message,sizeof(v->message),"Silent local video. A/Start pause; X stop; B Libraries."); return 1;
+    snprintf(v->message,sizeof(v->message),"Silent %s video. A/Start pause; X stop; B Libraries.",v->streaming?"Jellyfin":"local"); return 1;
 }
 int xf_video_start(xf_video *v, const char *path, const xf_video_backend *backend) {
     long size;
@@ -68,6 +68,12 @@ int xf_video_start(xf_video *v, const char *path, const xf_video_backend *backen
     v->size=(size_t)size; v->bytes=malloc(v->size);
     if(!v->bytes) { fail(v,"Insufficient memory for bounded test clip."); return 0; }
     v->state=XF_VIDEO_LOADING; snprintf(v->message,sizeof(v->message),"Loading local clip in 32 KiB steps; B cancels."); return 1;
+}
+int xf_video_start_network(xf_video *v,const xf_video_backend *backend) {
+    int rc;reset_for_start(v,backend);v->streaming=1;v->state=XF_VIDEO_LOADING;
+    rc=v->codec->open(NULL,0,&v->info,v->message,sizeof(v->message));
+    if(rc<0) {fail(v,v->message);return 0;}
+    snprintf(v->message,sizeof(v->message),"Buffering authenticated MPEG-PS stream.");return 1;
 }
 int xf_video_start_colours(xf_video *v, const xf_video_backend *backend) {
     reset_for_start(v,backend); v->synthetic=1;
@@ -97,8 +103,16 @@ static uint64_t clock_update(xf_video *v) {
     uint64_t now=v->backend.microseconds(v->backend.context);
     if(now<v->last_clock_us) { ++v->clock_faults; now=v->last_clock_us; }
     v->last_clock_us=now;
-    if(v->clock_started && !v->paused) v->timeline_us=v->origin_pts+now-v->origin_us-v->paused_us;
+    if(v->clock_started && !v->paused && !v->buffering) v->timeline_us=v->origin_pts+now-v->origin_us-v->paused_us;
     return now;
+}
+static void buffering(xf_video *v,int hold) {
+    int was=v->paused || v->buffering;clock_update(v);
+    if(hold && !v->buffering && v->clock_started) ++v->underruns;
+    v->buffering=!!hold;
+    if(!was && (v->paused || v->buffering))v->pause_at=v->last_clock_us;
+    if(was && !v->paused && !v->buffering)v->paused_us+=v->last_clock_us-v->pause_at;
+    v->sync.wait_at=0;
 }
 static int poll_pending(xf_video *v) {
     int rc;uint64_t start;
@@ -119,6 +133,7 @@ static int display_ready(xf_video *v) {
     uint64_t before,after,late;
     clock_update(v);
     if(!v->pending || !v->ready || v->paused) return 1;
+    if(v->buffering) {if(!v->eof && v->count<XF_VIDEO_QUEUE)return 1;buffering(v,0);clock_update(v);}
     if(!v->clock_started) {
         if(!v->eof && v->count<XF_VIDEO_QUEUE) return 1;
     } else if(v->pending_pts>v->timeline_us) return 1;
@@ -181,6 +196,7 @@ void xf_video_service(xf_video *v) {
         }
     }
     if(!display_ready(v)) return;
+    if(v->streaming && v->input_wait && !v->count && !v->pending && !v->eof && !v->buffering) buffering(v,1);
     if(v->eof && !v->count && !v->pending) {
         v->codec->close();free(v->bytes);v->bytes=NULL;v->state=XF_VIDEO_ENDED;
         snprintf(v->message,sizeof(v->message),"%s",v->synthetic?"Bars: black white RED GREEN BLUE cyan magenta yellow.":"End. R-stick: save CSV. LT late / RT VSync; A/Y replay; B Libraries.");
@@ -188,7 +204,7 @@ void xf_video_service(xf_video *v) {
 }
 static int slack(xf_video *v, uint64_t budget) {
     clock_update(v);
-    if(!v->clock_started || !v->pending) return 1;
+    if(!v->clock_started || !v->pending || v->buffering) return 1;
     return v->pending_pts>v->timeline_us && v->pending_pts-v->timeline_us>budget;
 }
 int xf_video_ui_safe(xf_video *v) {
@@ -197,6 +213,12 @@ int xf_video_ui_safe(xf_video *v) {
 }
 void xf_video_tick(xf_video *v, uint32_t now) {
     uint64_t before,after; (void)now;
+    if(v->state==XF_VIDEO_LOADING && v->streaming) {
+        int rc=v->codec->open(NULL,0,&v->info,v->message,sizeof(v->message));
+        if(rc<0) {++v->decode_failures;fail(v,v->message);return;}
+        if(rc==1)begin(v);
+        return;
+    }
     if(v->state==XF_VIDEO_LOADING) {
         size_t count=v->size-v->loaded;if(count>32768) count=32768;
         if(fread(v->bytes+v->loaded,1,count,v->file)!=count) {fail(v,"USB/file read failed or clip was truncated while loading.");return;}
@@ -220,6 +242,8 @@ void xf_video_tick(xf_video *v, uint32_t now) {
         else rc=v->codec->next(&source,v->message,sizeof(v->message));
         after=v->backend.microseconds(v->backend.context)-before;
         if(rc<0) {++v->decode_failures;clock_update(v);fail(v,v->message);return;}
+        v->input_wait=rc==2;
+        if(rc==2) {if(!v->count && !v->pending && !v->buffering)buffering(v,1);return;}
         if(!rc) {v->eof=1;++v->eof_events;}
         else {
             slot->work_us=after;v->decode_us+=after;if(after>v->max_decode_us) v->max_decode_us=after;
@@ -251,8 +275,8 @@ void xf_video_tick(xf_video *v, uint32_t now) {
 void xf_video_pause(xf_video *v, uint32_t now) {
     (void)now;if(v->state!=XF_VIDEO_PLAYING) return;
     clock_update(v);
-    if(v->paused) {v->paused_us+=v->last_clock_us-v->pause_at;v->paused=0;}
-    else {v->pause_at=v->last_clock_us;v->paused=1;}
+    if(v->paused) {v->paused=0;if(!v->buffering)v->paused_us+=v->last_clock_us-v->pause_at;}
+    else {if(!v->buffering)v->pause_at=v->last_clock_us;v->paused=1;}
     /* Pending gate waits do not include a user pause. */
     v->sync.wait_at=0;
 }
@@ -260,6 +284,8 @@ unsigned xf_video_wait_us(const xf_video *v) {
     uint64_t now,timeline,remaining;
     if(v->state!=XF_VIDEO_PLAYING || v->paused) return 10000;
     now=v->backend.microseconds(v->backend.context);
+    if(v->streaming && v->input_wait)return 1000;
+    if(v->buffering)return 1000;
     timeline=v->clock_started?v->origin_pts+now-v->origin_us-v->paused_us:0;
     if(v->pending && v->ready && v->clock_started) {
         if(v->pending_pts<=timeline) return v->sync.mode && !v->sync.fallbacks?500:0;
@@ -278,7 +304,7 @@ int xf_video_export(const xf_video *v, const char *path) {
     static const char *names[]={"late","overflow","decode","gpu","eos","present"};
     if(xf_video_active(v)) return 0;
     f=fopen(path,"wb");if(!f) return 0;
-    fprintf(f,"# version=0.5.2,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
+    fprintf(f,"# version=0.6,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
         v->sync.mode,(unsigned long long)v->late_threshold_us,v->decoded,v->rendered,v->dropped,v->cancelled,v->trace_overwritten);
     fprintf(f,"# proc_avg_us=%llu,proc_p95_us=%llu,proc_max_us=%llu,drift_us=%lld,vsync_wait_us=%llu\n",
         (unsigned long long)(v->processing.count?v->processing.sum/v->processing.count:0),

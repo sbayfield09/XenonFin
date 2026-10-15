@@ -24,6 +24,8 @@ int xf_http_get(xf_http_client *, const xf_endpoint *, const char *device,
 void xf_http_cancel(xf_http_client *);
 int xf_http_api(xf_http_client *, const xf_endpoint *, const char *device, const char *token,
                 const char *method, const char *resource, const char *json, uint32_t now);
+int xf_http_video(xf_http_client *, const xf_endpoint *, const char *device, const char *token,
+                  const char *resource, int (*sink)(void *, unsigned char), size_t (*space)(void *), void *, uint32_t now);
 int xf_http_audio(xf_http_client *, const xf_endpoint *, const char *device, const char *token,
                   const char *resource, int (*sink)(void *, unsigned char), size_t (*space)(void *), void *, uint32_t now);
 

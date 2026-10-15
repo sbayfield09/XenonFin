@@ -21,6 +21,7 @@
 #include "console_batch.h"
 #include "ui_clock.h"
 #include "video_native.h"
+#include "jvideo.h"
 #include "framebuffer.h"
 #include "timing.h"
 /* Application UI output goes directly to the composed text frame. */
@@ -28,13 +29,15 @@
 
 static const char *sections[] = {
     "Graphics / controller", "Network / DHCP diagnostics", "Audio output",
-    "Platform status", "Jellyfin server", "Jellyfin login", "Libraries", "Now playing", "Local video test"
+    "Platform status", "Jellyfin server", "Jellyfin login", "Libraries", "Now playing", "Video / local test"
 };
 static xf_http_client http;
 static xf_browser browser;
 enum { SECTION_COUNT = sizeof(sections)/sizeof(*sections) };
 static xf_music music;
 static xf_video video;
+static xf_jvideo jvideo;
+static xf_item selected_video;
 static unsigned video_metrics_page;
 static unsigned text_width = 72;
 enum { REQUEST_PUBLIC, REQUEST_LOGIN, REQUEST_BROWSE };
@@ -59,7 +62,7 @@ uint64_t xf_monotonic_us(void) {
 }
 uint32_t xf_monotonic_ms(void) { return (uint32_t)(xf_monotonic_us()/1000); }
 static void logout(void) {
-    xf_music_forget(&music);
+    xf_music_forget(&music);xf_jvideo_forget(&jvideo);
     authenticated = 0; xf_wipe(token, sizeof(token)); xf_wipe(user_id, sizeof(user_id)); xf_wipe(user_name, sizeof(user_name));
     xf_browser_init(&browser);
 }
@@ -153,14 +156,27 @@ static void wrapped(const char *text, unsigned skip, unsigned lines) {
 static void cell(const char *text, unsigned width) {
     char out[161]; xf_text_cell(out, sizeof(out), text, width); printf("%s", out);
 }
+static int start_network_video(const xf_item *it,uint32_t now) {
+    char device[65];xf_video_backend backend;
+    if(!authenticated || !xf_network_ready()) {snprintf(result,sizeof(result),"Sign in and verify networking before video playback.");return 0;}
+    if(xf_music_active(&music) || xenon_sound_get_unplayed() || http.active || xf_jvideo_active(&jvideo)) {
+        snprintf(result,sizeof(result),"Stop music/video and wait for current requests before starting video.");return 0;
+    }
+    snprintf(device,sizeof(device),"xenonfin-%02x%02x%02x%02x%02x%02x",netif.hwaddr[0],netif.hwaddr[1],netif.hwaddr[2],netif.hwaddr[3],netif.hwaddr[4],netif.hwaddr[5]);
+    xf_video_native_backend(&backend,1);
+    if(!xf_jvideo_play(&jvideo,&endpoint,device,token,user_id,it,&backend,now))return 0;
+    selected_video=*it;return 2;
+}
 static int play_selected(uint32_t now) {
-    const xf_item *it = browser.details ? &browser.detail : browser.page.count ? &browser.page.items[browser.current.selected] : NULL;
+    const xf_item *it=browser.details?&browser.detail:browser.page.count?&browser.page.items[browser.current.selected]:NULL;
     char device[65];
-    if (!it || strcmp(it->type, "Audio")) return 0;
-    if (!authenticated || !xf_network_ready()) { snprintf(result, sizeof(result), "Sign in and verify networking before playing music."); return 0; }
-    snprintf(device, sizeof(device), "xenonfin-%02x%02x%02x%02x%02x%02x", netif.hwaddr[0], netif.hwaddr[1], netif.hwaddr[2], netif.hwaddr[3], netif.hwaddr[4], netif.hwaddr[5]);
-    return xf_music_play(&music, &endpoint, device, token, user_id, it, &browser.current,
-        browser.current.start + browser.current.selected, browser.page.total, now);
+    if(!it)return 0;
+    if(browser.details && (!strcmp(it->type,"Movie") || !strcmp(it->type,"Episode"))){int rc=start_network_video(it,now);return rc?rc:-1;}
+    if(strcmp(it->type,"Audio"))return 0;
+    if(!authenticated || !xf_network_ready()) {snprintf(result,sizeof(result),"Sign in and verify networking before playing music.");return 0;}
+    if(xf_jvideo_active(&jvideo)) {snprintf(result,sizeof(result),"Wait for video cleanup before music playback.");return 0;}
+    snprintf(device,sizeof(device),"xenonfin-%02x%02x%02x%02x%02x%02x",netif.hwaddr[0],netif.hwaddr[1],netif.hwaddr[2],netif.hwaddr[3],netif.hwaddr[4],netif.hwaddr[5]);
+    return xf_music_play(&music,&endpoint,device,token,user_id,it,&browser.current,browser.current.start+browser.current.selected,browser.page.total,now);
 }
 static void detail_line(const char *label, const char *value) {
     if (*value) { printf("  %s", label); cell(value, text_width > strlen(label) ? text_width - (unsigned)strlen(label) : 1); printf("\n"); }
@@ -192,7 +208,9 @@ static void draw_browser(void) {
         else if (browser.detail_scroll > count - rows) browser.detail_scroll = count - rows;
         wrapped(it->overview, browser.detail_scroll, rows);
         if (!it->overview[0]) printf("  No overview supplied by server.\n");
-        printf(!strcmp(it->type, "Audio") ? "  A: play music   B: list   Back/View: now playing\n" : "  B: return to list. Video playback is not implemented.\n");
+        if(!strcmp(it->type,"Audio"))printf("  A: play music   B: list   Back/View: now playing\n");
+        else if(!strcmp(it->type,"Movie") || !strcmp(it->type,"Episode"))printf("  A: play silent Jellyfin video   B: return to list\n");
+        else printf("  B: return to list.\n");
     } else {
         if (!browser.loaded) printf("  A: load accessible Jellyfin libraries.\n");
         else if (!browser.page.count) printf("  Empty page / library. X refreshes; B goes back.\n");
@@ -266,6 +284,8 @@ static void draw_network(void) {
 }
 static void start_video(int gpu) {
     char path[128]; xf_video_backend backend;
+    if(xf_jvideo_active(&jvideo)) {snprintf(video.message,sizeof(video.message),"Wait for server video cleanup.");return;}
+    xf_jvideo_forget(&jvideo);
     if(xf_music_active(&music) || xenon_sound_get_unplayed()) {
         snprintf(video.message,sizeof(video.message),"Stop music on Now playing first; local video test has no audio."); return;
     }
@@ -275,6 +295,8 @@ static void start_video(int gpu) {
 }
 static void start_video_colours(int gpu) {
     xf_video_backend backend;
+    if(xf_jvideo_active(&jvideo))return;
+    xf_jvideo_forget(&jvideo);
     if(xf_music_active(&music) || xenon_sound_get_unplayed() || http.active) {
         snprintf(video.message,sizeof(video.message),"Stop music and wait for HTTP before the colour test."); return;
     }
@@ -301,11 +323,14 @@ static void video_save_trace(void) {
 static void draw_video(void) {
     unsigned x,y,w,h,footer;
     const xf_video_render_stats *m=video.backend.stats;
-    video_line("A CPU/pause Y GPU X stop B back L/R stats LT late RT sync");
-    video_line("%s %ux%u %.3f FPS | %s | stats %u/6",video.codec->name,video.info.width,video.info.height,video.info.fps,
-        video.paused?"PAUSED":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED",video_metrics_page+1);
-    video_line("%s",video.message);
-    if(video.state==XF_VIDEO_LOADING) video_line("File: %u / %u bytes (maximum 8 MiB)",(unsigned)video.loaded,(unsigned)video.size);
+    if(jvideo.state!=XF_JV_IDLE)video_line("A/Start pause X stop B back L/R stats | %s",jvideo.title);
+    else video_line("A CPU/pause Y GPU X stop B back L/R stats LT late RT sync");
+    video_line("%s %ux%u %.2f FPS | %s | %llu:%02llu | %u/8",video.codec->name,video.info.width,video.info.height,video.info.fps,
+        jvideo.state==XF_JV_NEGOTIATING?"NEGOTIATING":jvideo.state==XF_JV_STOPPING?"STOPPING":video.state==XF_VIDEO_ERROR || jvideo.state==XF_JV_ERROR?"ERROR":
+        video.paused?"PAUSED":video.buffering?"BUFFERING":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED",
+        (unsigned long long)(video.timeline_us/60000000),(unsigned long long)((video.timeline_us/1000000)%60),video_metrics_page+1);
+    video_line("%s",jvideo.state!=XF_JV_IDLE?jvideo.message:video.message);
+    if(video.state==XF_VIDEO_LOADING && !video.streaming) video_line("File: %u / %u bytes (maximum 8 MiB)",(unsigned)video.loaded,(unsigned)video.size);
     if(!xf_framebuffer_video_area(&x,&y,&w,&h,&footer)) return;
     while((unsigned)xf_console_cursor_y()<footer) printf("\n");
     video_line("FPS %u.%03u avg %.2f | dec %u shown %u drop %u",video.fps_milli/1000,video.fps_milli%1000,
@@ -336,10 +361,21 @@ static void draw_video(void) {
         }
         if(!seen) video_line("No drops logged. R-stick saves CSV after END/STOP.");
         if(seen<3) video_line("Trace %u overwritten %u cancel %u starve %u",video.trace_count,video.trace_overwritten,video.cancelled,video.starved);
-    } else {
+    } else if(video_metrics_page==5) {
         video_line("UI avg %.2f p95 %.2f max %.2f ms",video_avg(video.ui_times.sum,video.ui_times.count),(double)xf_time_p95(&video.ui_times)/1000,(double)video.ui_times.max/1000);
         video_line("Loop avg %.2f p95 %.2f max %.2f ms",video_avg(video.loop_times.sum,video.loop_times.count),(double)xf_time_p95(&video.loop_times)/1000,(double)video.loop_times.max/1000);
         video_line("Wait %.2f ms starve %u Qfull %u cancel %u",video_avg(video.wait_us,video.loop_count),video.starved,video.full_ticks,video.cancelled);
+    } else if(video_metrics_page==6) {
+        video_line("HTTP progressive MPEG-PS | %u | transcode %s",jvideo.stream_status,jvideo.source.transcoding?(video.decoded?"MPEG1 verified":"requested"):"no");
+        video_line("Net %u kbit/s | PS %u/%u ES %u/%u bytes",jvideo.kbps,(unsigned)jvideo.ps.count,XF_PS_RING,(unsigned)xf_mpeg1_stream_used(),XF_VIDEO_ES_BUFFER);
+        video_line("Timer %llu:%02llu / %llu:%02llu | underruns %u",(unsigned long long)(video.timeline_us/60000000),(unsigned long long)((video.timeline_us/1000000)%60),
+            (unsigned long long)(jvideo.source.runtime/600000000),(unsigned long long)((jvideo.source.runtime/10000000)%60),video.underruns);
+    } else {
+        video_line("Source %s / %s / %s %ux%u (%u sources)",jvideo.source.container,jvideo.source.video_codec,jvideo.source.audio_codec,jvideo.source.width,jvideo.source.height,jvideo.source.sources);
+        video_line("Net p95/max %.2f/%.2f Demux %.2f/%.2f ms",(double)xf_time_p95(&jvideo.network_times)/1000,(double)jvideo.network_times.max/1000,
+            (double)xf_time_p95(&jvideo.demux_times)/1000,(double)jvideo.demux_times.max/1000);
+        if(jvideo.report_message[0])video_line("%s",jvideo.report_message);
+        else video_line("Reports start/progress/stop/clean %u/%u/%u/%u | errs %u",jvideo.start_status,jvideo.progress_status,jvideo.stop_status,jvideo.cleanup_status,jvideo.report_errors);
     }
 }
 static void draw(int selected) {
@@ -348,7 +384,7 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.5.2 - XeLL / local video test\n");
+    printf("\n  XENONFIN 0.6 - XeLL / Jellyfin video\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < SECTION_COUNT; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
@@ -399,18 +435,20 @@ int main(void) {
     xf_ui_clock ui_clock = {0, 0};
     xf_audio_backend audio = { audio_queued, audio_free, audio_submit, NULL };
     memset(&previous, 0, sizeof(previous)); xf_http_init(&http); xf_browser_init(&browser);
-    xf_music_init(&music, &audio); xf_video_init(&video,&xf_mpeg1_codec);
+    xf_music_init(&music, &audio); xf_video_init(&video,&xf_mpeg1_codec);xf_jvideo_init(&jvideo,&video);
     /* Preserve the hardware-tested initialization order. */
     xenos_init(VIDEO_MODE_AUTO); console_init(); usb_init(); xenon_sound_init();
     if (!xf_console_init()) { printf("Unsupported framebuffer geometry; text compositor not started.\n"); return 1; }
     for (;;) {
         uint64_t loop_start=xf_monotonic_us();
         uint32_t now = (uint32_t)(loop_start/1000); char direction = 0, move = 0;
-        xf_network_tick(now); xf_http_tick(&http, now, xf_network_ready());
+        {uint64_t start=xf_monotonic_us();xf_network_tick(now);if(xf_jvideo_active(&jvideo)) {uint64_t cost=xf_monotonic_us()-start;jvideo.network_us+=cost;xf_time_add(&jvideo.network_times,cost);}}
+        xf_http_tick(&http, now, xf_network_ready());
         xf_music_tick(&music, now, xf_network_ready());
+        xf_jvideo_tick(&jvideo,now,xf_network_ready());
         xf_video_tick(&video,now);
-        if (music.session_expired) {
-            xf_http_cancel(&http); processed = 1; logout(); snprintf(result, sizeof(result), "HTTP 401: music session expired. Sign in again."); redraw = 1;
+        if (music.session_expired || jvideo.session_expired) {
+            xf_http_cancel(&http); processed = 1; logout(); snprintf(result, sizeof(result), "HTTP 401: playback session expired. Sign in again."); redraw = 1;
         }
         if (!processed && http.done && !http.active) { handle_result(); redraw = 1; }
         usb_do_poll(); memset(&pad, 0, sizeof(pad)); get_controller_data(&pad, 0);
@@ -452,7 +490,7 @@ int main(void) {
                 }
                 else if (selected == 5) selected = 4;
                 else if (selected == 7) selected = 6;
-                else if (selected == 8) { xf_video_stop(&video); selected=6; }
+                else if (selected == 8) { xf_jvideo_stop(&jvideo,now);xf_video_stop(&video); selected=6; }
                 else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); xf_video_stop(&video); xf_console_shutdown(); return 0; }
                 redraw = 1;
             }
@@ -468,8 +506,8 @@ int main(void) {
                 if ((pad.start && !previous.start) || (pad.a && !previous.a)) { xf_music_pause(&music); redraw = 1; }
             }
             if(selected==8) {
-                if(move=='L' || move=='R') { video_metrics_page=(video_metrics_page+(move=='R'?1:5))%6; redraw=1; }
-                if(!xf_video_active(&video)) {
+                if(move=='L' || move=='R') { video_metrics_page=(video_metrics_page+(move=='R'?1:7))%8; redraw=1; }
+                if(!xf_video_active(&video) && !xf_jvideo_active(&jvideo)) {
                     if(pad.rt>128 && previous.rt<=128) {xf_video_options(&video,(video.next_sync_mode+1)%3,video.next_late_threshold_us);redraw=1;}
                     if(pad.lt>128 && previous.lt<=128) {
                         uint64_t late=video.next_late_threshold_us==0?66667:video.next_late_threshold_us==66667?100000:video.next_late_threshold_us==100000?200000:0;
@@ -477,13 +515,13 @@ int main(void) {
                     }
                     if(pad.s2_z && !previous.s2_z) {video_save_trace();redraw=1;}
                 }
-                if((move=='U' || move=='D') && !xf_video_active(&video)) { start_video_colours(move=='D'); redraw=1; }
-                if(pad.x && !previous.x) { xf_video_stop(&video); redraw=1; }
+                if((move=='U' || move=='D') && !xf_video_active(&video) && !xf_jvideo_active(&jvideo)) { start_video_colours(move=='D'); redraw=1; }
+                if(pad.x && !previous.x) { xf_jvideo_stop(&jvideo,now);xf_video_stop(&video); redraw=1; }
                 if(pad.start && !previous.start) { xf_video_pause(&video,now); redraw=1; }
-                if(pad.y && !previous.y && !xf_video_active(&video)) { start_video(1); redraw=1; }
+                if(pad.y && !previous.y && !xf_video_active(&video) && !xf_jvideo_active(&jvideo)) { if(jvideo.state!=XF_JV_IDLE)start_network_video(&selected_video,now);else start_video(1);redraw=1; }
             }
             if (pad.a && !previous.a) {
-                if(selected==8) { if(xf_video_active(&video)) xf_video_pause(&video,now); else start_video(0); }
+                if(selected==8) { if(xf_video_active(&video)) xf_video_pause(&video,now); else if(!xf_jvideo_active(&jvideo)) {if(jvideo.state!=XF_JV_IDLE)start_network_video(&selected_video,now);else start_video(0);} }
                 if (selected == 1) {
                     xf_http_cancel(&http); handle_result(); processed = 1;
                     printf("\n  Initializing existing NIC driver (12s PHY watchdog).\n  DHCP negotiation will continue cooperatively afterwards.\n");
@@ -500,12 +538,14 @@ int main(void) {
                     else { logout(); xf_wipe(password, sizeof(password)); snprintf(result, sizeof(result), "Logged out; local token erased."); }
                 }
                 if (selected == 6) {
-                    if (play_selected(now)) selected = 7;
-                    else browse_request(browser.loaded ? XF_OPEN : XF_ROOT, now);
+                    int target=play_selected(now);
+                    if(target>0) selected=target==2?8:7;
+                    else if(!target) browse_request(browser.loaded ? XF_OPEN : XF_ROOT, now);
                 }
                 redraw = 1;
             }
         }
+        if(selected!=8 && xf_jvideo_active(&jvideo))xf_jvideo_stop(&jvideo,now);
         if(selected!=8 && (video.backend_started || video.state==XF_VIDEO_LOADING)) { xf_video_stop(&video); redraw=1; }
         /* Presentation never waits on GPU acknowledgement, decoding or HTTP.
          * Dirty controller/data events persist while a flip is pending. Only
