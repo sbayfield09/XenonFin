@@ -16,4 +16,8 @@ int main(void){uint32_t descriptors[64]={0};struct prefix context;struct netif n
  descriptors[1]=0;CHECK(n.linkoutput(&n,&packet)==ERR_OK&&calls==2);
  context.tx_index=16;CHECK(n.linkoutput(&n,&packet)==ERR_IF&&calls==2);context.tx_index=0;
  packet.tot_len=1529;CHECK(n.linkoutput(&n,&packet)==ERR_BUF&&calls==2);CHECK(invalidations==3);
- printf("Pinned Ethernet TX guard: %u checks passed\n",checks);return 0;}
+ context.rx=descriptors;context.rx_index=3;descriptors[13]=__builtin_bswap32(0x80000000u);
+ CHECK(!xf_driver_rx_ready(&n));descriptors[13]=0;CHECK(xf_driver_rx_ready(&n));
+ context.rx_index=16;CHECK(!xf_driver_rx_ready(&n));context.rx_index=-1;CHECK(!xf_driver_rx_ready(&n));
+ context.rx_index=0;context.rx=NULL;CHECK(!xf_driver_rx_ready(&n));CHECK(!xf_driver_rx_ready(NULL));
+ printf("Pinned Ethernet TX guard and RX descriptor inspection: %u checks passed\n",checks);return 0;}

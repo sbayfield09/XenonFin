@@ -13,6 +13,12 @@ enum { XF_AV_HTTP_RX, XF_AV_DEMUX, XF_AV_AUDIO_ES, XF_AV_MP3, XF_AV_PCM, XF_AV_D
 typedef struct { uint64_t value; uint32_t changed_at; } xf_av_stage;
 typedef struct { uint32_t at; unsigned state; } xf_av_transition;
 typedef struct { uint64_t offset; int64_t pts; } xf_av_pts;
+#define XF_AV_REBUFFERS 16U
+typedef struct {
+    uint32_t at,duration,pcm,audio_es,video_es,ps,video_queue,http_age;
+    uint64_t service_gap_us,submit_age_us,received;
+    char reason[72];
+} xf_av_rebuffer;
 typedef struct {
     xf_http_client stream,control;
     xf_video_ps ps;
@@ -26,6 +32,9 @@ typedef struct {
     enum xf_av_state av_state;
     xf_av_transition transitions[32]; unsigned transition_count;
     xf_av_stage stages[XF_AV_STAGE_COUNT];
+    xf_av_rebuffer rebuffers[XF_AV_REBUFFERS];
+    unsigned rebuffer_count,rebuffer_open;
+    uint64_t last_submit_at,last_service_gap_us;
     xf_av_pts first_pts[2][30]; unsigned pts_count[2];
     char wait_reason[96],error_origin[24];
     unsigned service_calls,submit_calls;

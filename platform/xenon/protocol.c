@@ -90,7 +90,7 @@ int xf_request(char *out, size_t cap, const xf_endpoint *ep, const char *device,
     }
     length = snprintf(out, cap,
         "%s %s HTTP/1.1\r\nHost: %s:%u\r\n"
-        "Authorization: MediaBrowser Client=\"XenonFin\", Device=\"Xbox360 XeLL\", DeviceId=\"%s\", Version=\"0.7.1\"\r\n"
+        "Authorization: MediaBrowser Client=\"XenonFin\", Device=\"Xbox360 XeLL\", DeviceId=\"%s\", Version=\"0.7.2\"\r\n"
         "Accept: application/json\r\nAccept-Encoding: identity\r\nConnection: close\r\n%s",
         login ? "POST" : "GET", login ? "/Users/AuthenticateByName" : "/System/Info/Public", ep->host, ep->port,
         device, login ? "Content-Type: application/json\r\n" : "\r\n");
@@ -123,7 +123,7 @@ int xf_api_request(char *out, size_t cap, const xf_endpoint *ep, const char *dev
         if (c < 33 || c > 126 || c == '#' || c == '\\') return -1;
     }
     n = snprintf(out, cap, "%s %s HTTP/1.1\r\nHost: %s:%u\r\n"
-        "Authorization: MediaBrowser Client=\"XenonFin\", Device=\"Xbox360 XeLL\", DeviceId=\"%s\", Version=\"0.7.1\", Token=\"%s\"\r\n"
+        "Authorization: MediaBrowser Client=\"XenonFin\", Device=\"Xbox360 XeLL\", DeviceId=\"%s\", Version=\"0.7.2\", Token=\"%s\"\r\n"
         "Accept: %s\r\nAccept-Encoding: identity\r\nConnection: close\r\n",
         method, resource, ep->host, ep->port, device, token, audio == 2 ? "video/mpeg,application/octet-stream" : audio ? "audio/mpeg,application/octet-stream" : "application/json");
     if (n < 0 || (size_t)n >= cap) goto fail;

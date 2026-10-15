@@ -18,6 +18,7 @@
 #include "driver_guard.h"
 #include "browse.h"
 #include "music.h"
+#include "sound_diag.h"
 #include "text.h"
 #include "console_batch.h"
 #include "ui_clock.h"
@@ -36,6 +37,8 @@ static xf_http_client http;
 static xf_browser browser;
 enum { SECTION_COUNT = sizeof(sections)/sizeof(*sections) };
 static xf_music music;
+static xf_sound_diag sound_test;
+static unsigned audio_resets;
 static xf_video video;
 static xf_jvideo jvideo;
 static xf_item selected_video;
@@ -63,6 +66,13 @@ uint64_t xf_monotonic_us(void) {
     return xf_ticks_to_us(((uint64_t)high << 32) | low,PPC_TIMEBASE_FREQ);
 }
 uint32_t xf_monotonic_ms(void) { return (uint32_t)(xf_monotonic_us()/1000); }
+static void service_network(uint32_t now) {
+    uint64_t start=xf_monotonic_us();xf_network_tick(now);
+    if(xf_jvideo_active(&jvideo)) {
+        uint64_t cost=xf_monotonic_us()-start;
+        jvideo.network_us+=cost;xf_time_add(&jvideo.network_times,cost);
+    }
+}
 static void logout(void) {
     xf_music_forget(&music);xf_jvideo_forget(&jvideo);
     authenticated = 0; xf_wipe(token, sizeof(token)); xf_wipe(user_id, sizeof(user_id)); xf_wipe(user_name, sizeof(user_name));
@@ -161,7 +171,7 @@ static void cell(const char *text, unsigned width) {
 static int start_network_video(const xf_item *it,uint32_t now) {
     char device[65];xf_video_backend backend;
     if(!authenticated || !xf_network_ready()) {snprintf(result,sizeof(result),"Sign in and verify networking before video playback.");return 0;}
-    if(xf_music_active(&music) || xenon_sound_get_unplayed() || http.active || xf_jvideo_active(&jvideo)) {
+    if(xf_music_active(&music) || xf_sound_diag_active(&sound_test) || xenon_sound_get_unplayed() || http.active || xf_jvideo_active(&jvideo)) {
         snprintf(result,sizeof(result),"Stop music/video and wait for current requests before starting video.");return 0;
     }
     snprintf(device,sizeof(device),"xenonfin-%02x%02x%02x%02x%02x%02x",netif.hwaddr[0],netif.hwaddr[1],netif.hwaddr[2],netif.hwaddr[3],netif.hwaddr[4],netif.hwaddr[5]);
@@ -288,7 +298,7 @@ static void start_video(int gpu) {
     char path[128]; xf_video_backend backend;
     if(xf_jvideo_active(&jvideo)) {snprintf(video.message,sizeof(video.message),"Wait for server video cleanup.");return;}
     xf_jvideo_forget(&jvideo);
-    if(xf_music_active(&music) || xenon_sound_get_unplayed()) {
+    if(xf_music_active(&music) || xf_sound_diag_active(&sound_test) || xenon_sound_get_unplayed()) {
         snprintf(video.message,sizeof(video.message),"Stop music on Now playing first; local video test has no audio."); return;
     }
     if(http.active) { snprintf(video.message,sizeof(video.message),"Wait for the current HTTP request before mounting USB."); return; }
@@ -299,7 +309,7 @@ static void start_video_colours(int gpu) {
     xf_video_backend backend;
     if(xf_jvideo_active(&jvideo))return;
     xf_jvideo_forget(&jvideo);
-    if(xf_music_active(&music) || xenon_sound_get_unplayed() || http.active) {
+    if(xf_music_active(&music) || xf_sound_diag_active(&sound_test) || xenon_sound_get_unplayed() || http.active) {
         snprintf(video.message,sizeof(video.message),"Stop music and wait for HTTP before the colour test."); return;
     }
     xf_video_native_backend(&backend,gpu); xf_video_start_colours(&video,&backend);
@@ -312,7 +322,7 @@ static void video_line(const char *format, ...) {
 }
 static void video_save_trace(void) {
     char path[128],source[128],error[180];const char *colon;
-    if(xf_video_active(&video) || xf_music_active(&music) || xenon_sound_get_unplayed()) {snprintf(video.message,sizeof(video.message),"Stop video/music before saving CSV.");return;}
+    if(xf_video_active(&video) || xf_music_active(&music) || xf_sound_diag_active(&sound_test) || xenon_sound_get_unplayed()) {snprintf(video.message,sizeof(video.message),"Stop video/music before saving CSV.");return;}
     snprintf(source,sizeof(source),"%s",video.path);
     if(!source[0] && !xf_video_local_path(source,sizeof(source),error,sizeof(error))) {
         snprintf(video.message,sizeof(video.message),"CSV needs the FAT USB test clip present.");return;
@@ -333,7 +343,7 @@ static void draw_video(void) {
     const xf_video_render_stats *m=video.backend.stats;
     if(jvideo.state!=XF_JV_IDLE)video_line("A/Start pause X stop B back L/R stats | Mode %c %s",jvideo.mode==XF_AV_VIDEO_ONLY?'A':jvideo.mode==XF_AV_AUDIO_ONLY?'B':'C',jvideo.title);
     else video_line("A CPU/pause Y GPU X stop B back L/R stats LT late RT sync");
-    video_line("%s %ux%u %.2f FPS | %s | %llu:%02llu | %u/14",video.codec->name,video.info.width,video.info.height,video.info.fps,
+    video_line("%s %ux%u %.2f FPS | %s | %llu:%02llu | %u/16",video.codec->name,video.info.width,video.info.height,video.info.fps,
         xf_jvideo_active(&jvideo) && jvideo.state!=XF_JV_STOPPING?xf_jvideo_state_name(jvideo.av_state):jvideo.state==XF_JV_NEGOTIATING?"NEGOTIATING":jvideo.state==XF_JV_STOPPING?"STOPPING":video.state==XF_VIDEO_ERROR || jvideo.state==XF_JV_ERROR?"ERROR":
         video.paused || (jvideo.pause_requested && jvideo.audio.enabled && !jvideo.audio.queued)?"PAUSED":jvideo.pause_requested?"PAUSING":video.buffering?"BUFFERING":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED",
         (unsigned long long)(video.timeline_us/60000000),(unsigned long long)((video.timeline_us/1000000)%60),video_metrics_page+1);
@@ -407,7 +417,7 @@ static void draw_video(void) {
         video_line("PTS first30 [%u] Up/Down | last V/A %lld/%lld",av_stamp_page,(long long)jvideo.ps.last_video_pts,(long long)jvideo.ps.last_audio_pts);
         video_line("V offset %llu PTS90k %lld (%u saved)",(unsigned long long)jvideo.first_pts[0][av_stamp_page].offset,(long long)jvideo.first_pts[0][av_stamp_page].pts,jvideo.pts_count[0]);
         video_line("A offset %llu PTS90k %lld (%u saved)",(unsigned long long)jvideo.first_pts[1][av_stamp_page].offset,(long long)jvideo.first_pts[1][av_stamp_page].pts,jvideo.pts_count[1]);
-    } else {
+    } else if(video_metrics_page==13) {
         unsigned i,n=jvideo.transition_count>3?3:jvideo.transition_count;
         video_line("Mode %c: L-stick changes when stopped | stages ms",jvideo.mode==XF_AV_VIDEO_ONLY?'A':jvideo.mode==XF_AV_AUDIO_ONLY?'B':'C');
         if(xf_jvideo_active(&jvideo)) {
@@ -420,7 +430,32 @@ static void draw_video(void) {
             const xf_av_transition *t=&jvideo.transitions[i%32];
             if(i+2>=jvideo.transition_count)video_line("State %s at %u ms",xf_jvideo_state_name(t->state),t->at);
         }
+    } else if(video_metrics_page==14) {
+        if(jvideo.rebuffer_count) {
+            const xf_av_rebuffer *r=&jvideo.rebuffers[(jvideo.rebuffer_count-1)%XF_AV_REBUFFERS];
+            video_line("Last rebuffer #%u: %s",jvideo.rebuffer_count,r->reason);
+            video_line("PCM %u AES %u VES %u PS %u Vq %u",r->pcm,r->audio_es,r->video_es,r->ps,r->video_queue);
+            video_line("Hold %ums service gap %.2fms submit age %.2fms",jvideo.rebuffer_open && xf_jvideo_active(&jvideo)?xf_monotonic_ms()-r->at:r->duration,(double)r->service_gap_us/1000,(double)r->submit_age_us/1000);
+        } else {
+            video_line("No unexpected rebuffer event recorded in this session.");
+            video_line("L/R page 15 retains the last event after recovery.");
+        }
+    } else {
+        const xf_network_metrics *n=xf_network_measurements();
+        video_line("TCP wnd %u ann %u refused %u BPbytes %u",jvideo.stream.receive_window,jvideo.stream.announced_window,jvideo.stream.refused_bytes,jvideo.stream.blocked_bytes);
+        video_line("Idle %ums state %u flags %x window retries %u",jvideo.stream.idle_age,jvideo.stream.tcp_state,jvideo.stream.tcp_flags,jvideo.stream.window_updates);
+        video_line("RX batch %u peak %u yields %u gap %.2fms TXbusy %u",n->last_batch,n->max_batch,n->budget_yields,(double)n->max_gap_us/1000,xf_driver_busy_count());
     }
+}
+static void draw_audio(void) {
+    uint32_t base=read32(0xea001600),status=read32(0xea001604),control=read32(0xea001608);
+    extern int xenos_is_hdmi;
+    printf("\n  A: 440 Hz stereo PCM test   Y: reset IDLE audio\n");
+    printf("  Route %s | 48000 Hz S16LE stereo | resets %u\n",xenos_is_hdmi?"HDMI":"analogue",audio_resets);
+    printf("  DMA base %08x control %08x status %08x\n",base,control,status);
+    printf("  Queued %d free %d bytes | read %u last %u remain %u\n",xenon_sound_get_unplayed(),xenon_sound_get_free(),status&31,(status>>8)&31,status>>16);
+    printf("  Tone frames %u/9600 submitted %u bytes state %u\n",sound_test.frames,sound_test.submitted,sound_test.state);
+    wrapped(sound_test.message,0,3);
 }
 static void draw(int selected) {
     int i;
@@ -428,14 +463,14 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.7.1 - XeLL / Jellyfin video\n");
+    printf("\n  XENONFIN 0.7.2 - XeLL / Jellyfin video\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < SECTION_COUNT; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
     if (selected < 6) printf("\n  LB/RB: sections  D-pad: navigate  A: select  B: back\n");
     if (selected == 0) printf("\n  Graphics initialized; controller input is polled.\n  Hardware boot, rendering, navigation and audio confirmed by user.\n  Text: changed regions; GPU flip wait disabled.\n");
     if (selected == 1) draw_network();
-    if (selected == 2) printf("\n  A: existing 440 Hz stereo PCM diagnostic.\n  During music, A stops it first; press A again after it stops.\n");
+    if (selected == 2) draw_audio();
     if (selected == 3) printf("\n  XeLL ELF; no XEX conversion.\n  Native raw lwIP TCP: no socket or DNS layer, no TLS.\n  HTTP connect/idle timeout 8s; total request timeout 20s.\n  DHCP and HTTP continue while navigating/typing.\n  Server/username/token are RAM-only; password wiped on submit.\n  Local silent MPEG-1 test: select Local video test.\n");
     if (selected == 4) {
         printf("\n  Server: "); safe_print(address[0] ? address : "not set", XF_TEXT_LIMIT);
@@ -489,20 +524,22 @@ int main(void) {
     xf_ui_clock ui_clock = {0, 0};
     xf_audio_backend audio = { audio_queued, audio_free, audio_submit, NULL };
     memset(&previous, 0, sizeof(previous)); xf_http_init(&http); xf_browser_init(&browser);
-    xf_music_init(&music, &audio); xf_video_init(&video,&xf_mpeg1_codec);xf_jvideo_init(&jvideo,&video);xf_jvideo_audio(&jvideo,&audio);
+    xf_sound_diag_init(&sound_test,&audio);xf_music_init(&music, &audio); xf_video_init(&video,&xf_mpeg1_codec);xf_jvideo_init(&jvideo,&video);xf_jvideo_audio(&jvideo,&audio);
     /* Preserve the hardware-tested initialization order. */
     xenos_init(VIDEO_MODE_AUTO); console_init(); usb_init(); xenon_sound_init();
     if (!xf_console_init()) { printf("Unsupported framebuffer geometry; text compositor not started.\n"); return 1; }
     for (;;) {
         uint64_t loop_start=xf_monotonic_us();
         uint32_t now = (uint32_t)(loop_start/1000); char direction = 0, move = 0;
+        xf_sound_diag_tick(&sound_test,now);
         xf_jvideo_service(&jvideo,now);
-        {uint64_t start=xf_monotonic_us();xf_network_tick(now);if(xf_jvideo_active(&jvideo)) {uint64_t cost=xf_monotonic_us()-start;jvideo.network_us+=cost;xf_time_add(&jvideo.network_times,cost);}}
+        service_network(now);
         xf_http_tick(&http, now, xf_network_ready());
         xf_music_tick(&music, now, xf_network_ready());
         xf_jvideo_tick(&jvideo,now,xf_network_ready());
         if(jvideo.mode!=XF_AV_AUDIO_ONLY || !xf_jvideo_active(&jvideo))xf_video_tick(&video,now);
         xf_jvideo_service(&jvideo,now);
+        service_network(xf_monotonic_ms());
         if (music.session_expired || jvideo.session_expired) {
             xf_http_cancel(&http); processed = 1; logout(); snprintf(result, sizeof(result), "HTTP 401: playback session expired. Sign in again."); redraw = 1;
         }
@@ -550,6 +587,15 @@ int main(void) {
                 else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); xf_video_stop(&video); xf_console_shutdown(); return 0; }
                 redraw = 1;
             }
+            if(pad.y && !previous.y && selected==2) {
+                if(xf_music_active(&music) || xf_jvideo_active(&jvideo) || xf_sound_diag_active(&sound_test))
+                    snprintf(sound_test.message,sizeof(sound_test.message),"Reset blocked while playback/tone owns audio. Stop and wait first.");
+                else {
+                    xenon_sound_init();++audio_resets;xf_sound_diag_init(&sound_test,&audio);
+                    snprintf(sound_test.message,sizeof(sound_test.message),"Audio reset complete. Press A; check raw control and DMA progress.");
+                }
+                redraw=1;
+            }
             if (pad.y && !previous.y && selected == 4) { begin_edit(1); redraw = 1; }
             if (pad.x && !previous.x && selected == 4) { show_body = !show_body; redraw = 1; }
             if (selected == 6) {
@@ -562,7 +608,7 @@ int main(void) {
                 if ((pad.start && !previous.start) || (pad.a && !previous.a)) { xf_music_pause(&music); redraw = 1; }
             }
             if(selected==8) {
-                if(move=='L' || move=='R') { video_metrics_page=(video_metrics_page+(move=='R'?1:13))%14; redraw=1; }
+                if(move=='L' || move=='R') { video_metrics_page=(video_metrics_page+(move=='R'?1:15))%16; redraw=1; }
                 if(!xf_video_active(&video) && !xf_jvideo_active(&jvideo)) {
                     if(pad.rt>128 && previous.rt<=128) {xf_video_options(&video,(video.next_sync_mode+1)%3,video.next_late_threshold_us);redraw=1;}
                     if(pad.lt>128 && previous.lt<=128) {
@@ -586,8 +632,10 @@ int main(void) {
                     if (!xf_network_start(xf_monotonic_ms())) snprintf(result, sizeof(result), "Network start failed; inspect DHCP diagnostics.");
                 }
                 if (selected == 2) {
-                    if (xf_music_active(&music)) { xf_music_stop(&music, now); snprintf(result, sizeof(result), "Music stopping. Press A again after it stops for the diagnostic tone."); }
-                    else if (!xenon_sound_get_unplayed()) xenon_tone(440, 200, XENON_TONE_AMPLITUDE_25);
+                    if(xf_music_active(&music) || xf_jvideo_active(&jvideo)) {
+                        xf_music_stop(&music,now);xf_jvideo_stop(&jvideo,now);
+                        snprintf(sound_test.message,sizeof(sound_test.message),"Stopping playback. Press A after cleanup to test the tone.");
+                    } else xf_sound_diag_start(&sound_test,0,now);
                 }
                 if (selected == 4 && !http.active) { if (!server_valid) begin_edit(1); else start_request(0, now); }
                 if (selected == 5 && !http.active) {
@@ -612,7 +660,7 @@ int main(void) {
         xf_jvideo_service(&jvideo,now);
         xf_console_poll(now);
         if (xf_console_ready() && (redraw || xf_video_ui_safe(&video)) && xf_ui_due(&ui_clock, now, redraw,
-                !editing && (selected == 1 || selected == 7 || selected == 8 || http.active))) {
+                !editing && (selected == 1 || selected == 2 || selected == 7 || selected == 8 || http.active))) {
             uint64_t ui_start=xf_monotonic_us();
             draw(selected); xf_ui_rendered(&ui_clock, now); redraw = 0;
             if(selected==8 && video.state==XF_VIDEO_PLAYING) { uint64_t cost=xf_monotonic_us()-ui_start;video.ui_us+=cost;++video.ui_frames;xf_time_add(&video.ui_times,cost); }
@@ -620,6 +668,10 @@ int main(void) {
         xf_video_service(&video);
         xf_jvideo_service(&jvideo,now);
         previous = pad;
+        /* Receive-window ACKs and arrived packets need service between codec
+         * calls, not just once per decoded/presented frame. Audio stays first. */
+        service_network(xf_monotonic_ms());
+        xf_jvideo_service(&jvideo,now);
         {
             uint64_t wait_start=xf_monotonic_us();
             unsigned wait=xf_video_wait_us(&video);

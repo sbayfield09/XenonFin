@@ -5,6 +5,7 @@
 /* Adapter for the pinned Free60 enet.o, not a new Ethernet implementation. */
 void xf_driver_guard_install(struct netif *);
 unsigned xf_driver_busy_count(void);
+int xf_driver_rx_ready(struct netif *);
 err_t xf_guarded_enet_init(struct netif *);
 int xf_phy_timed_out(void);
 uint32_t xf_monotonic_ms(void);

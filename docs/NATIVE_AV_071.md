@@ -1,5 +1,7 @@
 # XenonFin 0.7.1 — A/V recovery and hardware diagnostics
 
+Historical 0.7.1 record. For the current receive/rebuffer build and the user’s subsequent console findings, see [0.7.2](NATIVE_AV_072.md).
+
 The user confirmed 0.6 silent Jellyfin video at approximately 30 FPS, then reported **severe stutter, intermittent soundtrack, approximately 18 FPS and a client-generated A/V error after 30–60 seconds in 0.7**. The changes below fix reproducible scheduling defects. **Uninterrupted, synchronised ten-minute playback on Xbox is still awaiting hardware acceptance.** Cloud tests cannot measure the console DMA engine, PowerPC decoder performance, HDMI sound or television latency.
 
 ## Cause established from code and regression tests

@@ -83,15 +83,17 @@ int main(void){
     /* Recovery with a prepared picture and no queued successors used to
      * wait forever for a FULL video queue. It now needs one usable picture. */
     start();ready_audio();audio_can_submit=1;movie.stream.response.headers_done=1;
-    movie.audio.started=movie.audio.aligned=movie.audio.rebuffering=1;
+    movie.audio.started=movie.audio.aligned=1;
     movie.audio.have_video_pts=movie.audio.have_audio_pts=1;
     movie.audio.submitted=movie.audio.played=48000;
     movie.audio.maps[0]=(xf_av_map){0,90000};movie.audio.map_count=1;
     player.state=XF_VIDEO_PLAYING;player.pending=player.ready=1;player.count=0;
     movie.audio.decoder.pcm_size=8192;xf_jvideo_service(&movie,2);
     CHECK(!audio_pending && movie.av_state==XF_AV_REBUFFERING);
+    CHECK(movie.rebuffer_count==1 && movie.rebuffers[0].pcm==8192 && movie.rebuffers[0].video_queue==1 && strstr(movie.rebuffers[0].reason,"PCM low"));
     movie.audio.decoder.pcm_size=16384;xf_jvideo_service(&movie,3);
     CHECK(audio_pending==8192 && !movie.audio.rebuffering && movie.av_state==XF_AV_PLAYING);
+    CHECK(!movie.rebuffer_open && movie.rebuffers[0].duration==1 && movie.rebuffer_count==1);
     xf_jvideo_stop(&movie,4);audio_pending=0;clean();
     /* An empty picture queue between decode calls is not input starvation.
      * Steady DMA must refill without requiring another prepared picture. */

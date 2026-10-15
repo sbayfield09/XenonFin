@@ -313,7 +313,7 @@ int xf_video_export(const xf_video *v, const char *path) {
     static const char *names[]={"late","overflow","decode","gpu","eos","present"};
     if(xf_video_active(v)) return 0;
     f=fopen(path,"wb");if(!f) return 0;
-    fprintf(f,"# version=0.7.1,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
+    fprintf(f,"# version=0.7.2,mode=%u,threshold_us=%llu,decoded=%u,presented=%u,dropped=%u,cancelled=%u,overwritten=%u\n",
         v->sync.mode,(unsigned long long)v->late_threshold_us,v->decoded,v->rendered,v->dropped,v->cancelled,v->trace_overwritten);
     fprintf(f,"# proc_avg_us=%llu,proc_p95_us=%llu,proc_max_us=%llu,drift_us=%lld,vsync_wait_us=%llu\n",
         (unsigned long long)(v->processing.count?v->processing.sum/v->processing.count:0),

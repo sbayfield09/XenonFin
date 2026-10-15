@@ -10,6 +10,8 @@ struct netif netif;
 static struct dhcp lease;
 static unsigned checks, inits, starts, stops, polls, arps, fragments, guards;
 static uint32_t clock_value;
+static uint64_t clock_us;
+static unsigned rx_pending,poll_cost;
 static unsigned quiesces;
 static int fail_init;
 #define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"DHCP adapter line %d: %s\n",__LINE__,#x);exit(1);}}while(0)
@@ -18,12 +20,14 @@ err_t enet_init(struct netif *n){n->flags=NETIF_FLAG_ETHARP|NETIF_FLAG_LINK_UP;r
 err_t xf_guarded_enet_init(struct netif *n){return fail_init?ERR_TIMEOUT:enet_init(n);}
 int xf_phy_timed_out(void){return fail_init;}
 uint32_t xf_monotonic_ms(void){return clock_value;}
+uint64_t xf_monotonic_us(void){return clock_us;}
+int xf_driver_rx_ready(struct netif *n){CHECK(n==&netif);return rx_pending!=0;}
 struct netif *netif_add(struct netif *n,ip_addr_t *ip,ip_addr_t *mask,ip_addr_t *gw,void *state,netif_init_fn init,netif_input_fn input){(void)state;n->ip_addr=*ip;n->netmask=*mask;n->gw=*gw;n->input=input;CHECK(init);if(init(n)!=ERR_OK)return NULL;return n;}
 void netif_set_default(struct netif *n){CHECK(n==&netif);}
 void netif_set_addr(struct netif *n,ip_addr_t *ip,ip_addr_t *mask,ip_addr_t *gw){n->ip_addr=*ip;n->netmask=*mask;n->gw=*gw;}
 err_t dhcp_start(struct netif *n){++starts;CHECK(n->ip_addr.addr==0);memset(&lease,0,sizeof(lease));n->dhcp=&lease;n->flags|=NETIF_FLAG_DHCP;lease.state=DHCP_SELECTING;return ERR_OK;}
 void dhcp_stop(struct netif *n){++stops;lease.state=DHCP_OFF;n->flags&=(u8_t)~NETIF_FLAG_DHCP;}
-void network_poll(void){++polls;}
+void network_poll(void){++polls;if(rx_pending)--rx_pending;clock_us+=poll_cost;}
 void enet_quiesce(void){++quiesces;}
 void etharp_tmr(void){++arps;}
 void ip_reass_tmr(void){++fragments;}
@@ -41,4 +45,14 @@ int main(int argc,char **argv){
  lease.state=DHCP_RENEWING;CHECK(xf_network_ready());lease.offered_ip_addr.addr=124;CHECK(!xf_network_ready());lease.offered_ip_addr.addr=123;
  netif.flags&=(u8_t)~NETIF_FLAG_LINK_UP;CHECK(!xf_network_ready());netif.flags|=NETIF_FLAG_LINK_UP;
  clock_value=22000;CHECK(xf_network_start(22000));CHECK(inits==1&&starts==2&&stops==1&&guards==1&&!netif.ip_addr.addr&&!xf_network_ready());
- xf_network_tick(23000);CHECK(polls>=5);printf("DHCP adapter/start/retry/timers: %u checks passed\n",checks);return 0;}
+ xf_network_tick(23000);CHECK(polls>=5);
+ /* A burst must drain in one service, not one packet per expensive UI/codec
+  * iteration. Bound both a continuously busy ring and costly callbacks. */
+ {unsigned before=polls;rx_pending=12;poll_cost=100;xf_network_tick(23001);
+ CHECK(polls-before==12&&!rx_pending&&xf_network_measurements()->last_batch==12);}
+ {unsigned before=polls;rx_pending=32;poll_cost=0;xf_network_tick(23002);
+ CHECK(polls-before==16&&rx_pending==16&&xf_network_measurements()->budget_yields==1);}
+ {unsigned before=polls;poll_cost=700;xf_network_tick(23003);
+ CHECK(polls-before==3&&rx_pending==13&&xf_network_measurements()->budget_yields==2);}
+ rx_pending=0;poll_cost=0;xf_network_tick(23004);CHECK(xf_network_measurements()->last_batch==0);
+ printf("DHCP adapter/start/retry/timers and bounded RX batches: %u checks passed\n",checks);return 0;}

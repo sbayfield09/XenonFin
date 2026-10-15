@@ -1,5 +1,10 @@
 # Validation — 14 October 2026
 
+## Native 0.7.2 receive/rebuffer update
+
+The user confirms real HDMI movie audio/video are in sync while PLAYING, but repeated rebuffering eventually ends in an HTTP idle timeout. The earlier missing 440 Hz tone was caused by active video ownership. Version 0.7.2 batches pending Ethernet RX descriptors with a bounded service budget, services networking around codec/UI work, retries reopened receive-window updates, and preserves rebuffer/TCP snapshots. It also repairs an independently verified sound-driver control-register read and provides a cooperative tone/idle reset. [Source findings, evidence and hardware procedure](NATIVE_AV_072.md). **Continuous Xbox playback and the new driver/network changes still require physical testing.** Earlier release results below are historical.
+
+
 ## Native 0.7.1 recovery update
 
 Real Xbox testing found 0.7 A/V stutter and an application-generated stall/error. Version 0.7.1 fixes a deterministic frozen-master/full-video-preroll dependency, prioritises cooperative PCM refills, retains buffer capacities, and adds A/B/C comparison modes plus DMA/HTTP/PTS/stage diagnostics. [Exact cause, controls, ten-minute acceptance and test evidence](NATIVE_AV_071.md). Hardware acceptance remains pending; historical host results below cannot establish physical sound or A/V synchronisation. Current [0.7.1 counters](native-av-recovery-metrics.json): 15 sanitized real-server cases and a 600-second host run with 18,001/18,001 video frames, zero drops/audio underruns/bridging/late trims. Injected CPU/network starvation was counted and recovered; these are host models.

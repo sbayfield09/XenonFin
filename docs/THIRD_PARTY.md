@@ -31,3 +31,7 @@ The 0.4.2 console adapter reuses the linked libXenon GPL 8x16 Linux font and ada
 - **Synthetic test video** is generated locally from FFmpeg `testsrc2` using the documented command; it contains no third-party movie or music content. It is bundled only as a hardware test fixture.
 
 The earlier XMPlayer row described the pre-0.5 reference-only investigation; the two shader arrays are now the explicit reused component. Native video tile addressing also retains the existing libXenon console attribution. Binary archives contain the pl_mpeg/MIT, libfat, console and GPL notices, and the source archive contains the actual decoder edits and renderer sources.
+
+## Native 0.7.2 pinned sound driver
+
+`platform/xenon/third_party/libxenon_sound/sound.c` vendors the sound driver from the same pinned Free60 libXenon commit `c32c813c3d630ae922f83395ee4509b0468af71d`, with a control-register read repair, idle-reset ordering, whole-descriptor legacy tone and host-test address casts. The BSD copyright/conditions are reproduced in [LIBXENON_SOUND_LICENSE.md](LIBXENON_SOUND_LICENSE.md) and the vendored LICENSE; local changes and provenance are in the vendored SOURCE.md. The application links this object before libxenon.a; its previous sound.o is not selected. Notices accompany the source and boot binary archives.

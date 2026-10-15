@@ -15,6 +15,10 @@ typedef struct {
     void *stream_context;
     int streaming, backpressure;
     int last_receive_result; unsigned receive_calls,eof_seen;
+    /* Snapshot before detach: no pointers, payloads, URLs or credentials. */
+    unsigned receive_window,announced_window,refused_bytes,tcp_flags,tcp_state;
+    unsigned window_updates,blocked_bytes;uint32_t window_update_at,idle_age;
+    int window_recovery;
 } xf_http_client;
 void xf_http_init(xf_http_client *);
 int xf_http_begin(xf_http_client *, const xf_endpoint *, const char *device,
@@ -31,6 +35,11 @@ int xf_http_audio(xf_http_client *, const xf_endpoint *, const char *device, con
                   const char *resource, int (*sink)(void *, unsigned char), size_t (*space)(void *), void *, uint32_t now);
 
 int xf_network_start(uint32_t now);
+typedef struct {
+    unsigned polls,frames,last_batch,max_batch,budget_yields;
+    uint64_t max_gap_us;
+} xf_network_metrics;
+const xf_network_metrics *xf_network_measurements(void);
 void xf_network_tick(uint32_t now);
 int xf_network_ready(void);
 int xf_network_available(void);

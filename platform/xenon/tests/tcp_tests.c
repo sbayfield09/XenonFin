@@ -38,11 +38,21 @@ int main(void){char err[128];size_t i;CHECK(xf_endpoint_parse("192.168.68.202:80
  {
   const char *wire="HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nmp3";unsigned freed=frees;struct pbuf *p=calloc(1,sizeof(*p));
   p->len=p->tot_len=(u16_t)strlen(wire);p->payload=malloc(p->len);memcpy(p->payload,wire,p->len);stream_space=0;
-  CHECK(c.pcb->recv(c.pcb->callback_arg,c.pcb,p,ERR_OK)==ERR_MEM);CHECK(frees==freed&&!c.received_size&&!c.response.headers_done&&!streamed);
-  stream_space=8192;CHECK(c.pcb->recv(c.pcb->callback_arg,c.pcb,p,ERR_OK)==ERR_OK);CHECK(frees==freed+1&&streamed==3&&c.response.body_size==3&&c.done);
+  CHECK(c.pcb->recv(c.pcb->callback_arg,c.pcb,p,ERR_OK)==ERR_MEM);CHECK(frees==freed&&!c.received_size&&!c.response.headers_done&&!streamed&&c.blocked_bytes==p->tot_len);
+  stream_space=8192;CHECK(c.pcb->recv(c.pcb->callback_arg,c.pcb,p,ERR_OK)==ERR_OK);CHECK(frees==freed+1&&streamed==3&&c.response.body_size==3&&c.done&&c.window_recovery&&!c.backpressure&&!c.blocked_bytes);
  }
  xf_http_tick(&c,1,1);CHECK(!c.active&&!c.request[0]);
  CHECK(xf_http_audio(&c,&ep,"device","stream-token","/Audio/id/stream.mp3",sink,space,NULL,0));establish();data("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n");
- c.backpressure=1;stream_space=0;xf_http_tick(&c,1,1);xf_http_tick(&c,60000,1);CHECK(c.active&&!c.done); /* Capacity-limited pause has no 20s song limit. */
+ c.backpressure=1;c.blocked_bytes=TCP_WND+1000;stream_space=TCP_WND;xf_http_tick(&c,1,1);xf_http_tick(&c,60000,1);CHECK(c.active&&!c.done); /* Protect exact retained pbuf, not a guessed TCP_WND capacity. */
  stream_space=8192;xf_http_tick(&c,68000,1);CHECK(c.done&&!c.active&&strstr(c.error,"idle"));
+ /* A reopened window whose first ACK was lost must be re-advertised. An ACK
+  * attempt is not received data and must never postpone a real idle timeout. */
+ CHECK(xf_http_video(&c,&ep,"device","stream-token","/Videos/id/stream.mpg",sink,space,NULL,0));establish();
+ data("HTTP/1.1 200 OK\r\nContent-Length: 99999\r\n\r\n");xf_http_tick(&c,1,1);
+ c.window_recovery=1;c.pcb->rcv_wnd=TCP_WND;c.pcb->rcv_ann_wnd=TCP_WND;
+ xf_http_tick(&c,250,1);CHECK(!c.window_updates);
+ xf_http_tick(&c,251,1);CHECK(c.window_updates==1&&(c.pcb->flags&TF_ACK_NOW));
+ xf_http_tick(&c,300,1);CHECK(c.window_updates==1&&c.progress==1);
+ data("x");xf_http_tick(&c,301,1);CHECK(!c.window_recovery&&c.progress==301);
+ c.window_recovery=1;xf_http_tick(&c,8301,1);CHECK(c.done&&!c.active&&strstr(c.error,"idle")&&c.receive_window==TCP_WND&&c.idle_age==8000);
  CHECK(writes>0);printf("Native raw TCP callbacks/timeouts/cancellation/cleanup: %u checks passed\n",checks);return 0;}

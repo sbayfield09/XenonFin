@@ -13,6 +13,10 @@
 extern void enet_quiesce(void);
 static int initialized, broken, waiting, timed_out, start_error;
 static uint32_t began, arp_tick, fragment_tick;
+extern uint64_t xf_monotonic_us(void);
+static xf_network_metrics metrics;
+static uint64_t polled_at;
+const xf_network_metrics *xf_network_measurements(void) {return &metrics;}
 
 int xf_network_available(void) { return initialized; }
 int xf_network_ready(void) {
@@ -42,8 +46,24 @@ int xf_network_start(uint32_t now) {
 }
 void xf_network_tick(uint32_t now) {
     if (!initialized) return;
-    /* Always pump DHCP/TCP, even before a lease or after a timeout. */
-    network_poll();
+    /* Pinned network_poll -> enet_poll consumes ONE Ethernet descriptor, not
+     * the RX ring. Drain pending packets without waiting for new arrivals.
+     * At most one 16-slot ring or 2ms per service; audio runs on either side.
+     * Always call once for DHCP/TCP timers, including an empty RX ring. */
+    {
+        uint64_t start=xf_monotonic_us();unsigned frames=0,attempts=0;
+        if(polled_at && start-polled_at>metrics.max_gap_us)metrics.max_gap_us=start-polled_at;
+        polled_at=start;
+        do {
+            int pending=xf_driver_rx_ready(&netif);
+            network_poll();++metrics.polls;++attempts;
+            if(pending)++frames;
+            if(!xf_driver_rx_ready(&netif))break;
+            if(attempts>=16 || xf_monotonic_us()-start>=2000) {++metrics.budget_yields;break;}
+        } while(1);
+        metrics.frames+=frames;metrics.last_batch=frames;
+        if(frames>metrics.max_batch)metrics.max_batch=frames;
+    }
     if ((uint32_t)(now - arp_tick) >= ARP_TMR_INTERVAL) { etharp_tmr(); arp_tick = now; }
 #if IP_REASSEMBLY
     if ((uint32_t)(now - fragment_tick) >= IP_TMR_INTERVAL) { ip_reass_tmr(); fragment_tick = now; }

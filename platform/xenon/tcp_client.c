@@ -59,9 +59,10 @@ static err_t received(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
         /* ERR_MEM transfers no ownership and acknowledges no bytes. lwIP retains
          * and retries this exact pbuf, including when playback is paused. */
         if (c->streaming && !c->done && err == ERR_OK && c->receive_space(c->stream_context) < p->tot_len) {
-            c->backpressure = 1; c->last_receive_result=ERR_MEM;return ERR_MEM;
+            c->backpressure = 1;c->blocked_bytes=p->tot_len; c->last_receive_result=ERR_MEM;return ERR_MEM;
         }
-        c->backpressure = 0;
+        c->window_recovery=c->backpressure;
+        c->backpressure = 0;c->blocked_bytes=0;
         c->received_size += p->tot_len;
         if (err != ERR_OK) error(c, err, tcp_error(err));
         else {
@@ -154,7 +155,24 @@ void xf_http_tick(xf_http_client *c, uint32_t now, int ready) {
     size_t progress = c->received_size + c->acknowledged + (size_t)c->connected;
     if (progress != c->observed) { c->observed = progress; c->progress = now; }
     if (!c->done && !ready) error(c, 0, "DHCP lease/link unavailable; reconnect network");
-    if (c->streaming && c->connected && c->backpressure && c->receive_space(c->stream_context) < TCP_WND) c->progress = now;
+    if(c->pcb) {
+        c->receive_window=c->pcb->rcv_wnd;c->announced_window=c->pcb->rcv_ann_wnd;
+        c->refused_bytes=c->pcb->refused_data?c->pcb->refused_data->tot_len:0;
+        c->tcp_flags=c->pcb->flags;c->tcp_state=c->pcb->state;
+    }
+    if (c->streaming && c->connected && c->backpressure && c->receive_space(c->stream_context) < c->blocked_bytes) c->progress = now;
+    c->idle_age=now-c->progress;
+    /* lwIP 1.4.1 tcp_send_empty_ack clears ACK flags and discards ip_output's
+     * error. A TX-busy window update can therefore be lost after ERR_MEM receive
+     * backpressure. Re-advertise only this reopened window if no new data comes
+     * for 250ms; no fake receive progress and no extension of the 8s deadline.
+     * The next accepted packet clears window_recovery. All calls are outside
+     * callbacks on the sole NO_SYS network owner. */
+    if(!c->done && c->pcb && c->streaming && c->connected && c->window_recovery &&
+       !c->backpressure && c->receive_window && c->idle_age>=250 && (uint32_t)(now-c->window_update_at)>=250) {
+        c->pcb->flags|=TF_ACK_NOW;tcp_output(c->pcb);
+        c->window_update_at=now;++c->window_updates;
+    }
     if (!c->done && (!c->streaming || !c->response.headers_done) && (uint32_t)(now - c->began) >= 20000) error(c, ERR_TIMEOUT, "HTTP total timeout (20 seconds)");
     if (!c->done && !c->connected && (uint32_t)(now - c->began) >= 8000) error(c, ERR_TIMEOUT, "TCP connect timeout (8 seconds)");
     if (!c->done && c->connected && (uint32_t)(now - c->progress) >= 8000) error(c, ERR_TIMEOUT, "HTTP idle timeout (8 seconds)");

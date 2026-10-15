@@ -16,6 +16,7 @@ typedef struct {
     void *tx_buffer;
 } enet_prefix;
 #ifdef XENON
+typedef char assert_rx_index_offset[(offsetof(enet_prefix, rx_index) == 8) ? 1 : -1];
 typedef char assert_tx_pointer_offset[(offsetof(enet_prefix, tx_descriptors) == 12) ? 1 : -1];
 typedef char assert_tx_index_offset[(offsetof(enet_prefix, tx_index) == 16) ? 1 : -1];
 #endif
@@ -42,3 +43,14 @@ void xf_driver_guard_install(struct netif *interface) {
     if (interface->linkoutput != send_guarded) { original = interface->linkoutput; interface->linkoutput = send_guarded; }
 }
 unsigned xf_driver_busy_count(void) { return busy; }
+/* Same cache invalidation and LE ownership bit as enet_linkinput. Inspect only;
+ * the original driver remains the sole consumer/reclaimer of RX descriptors. */
+int xf_driver_rx_ready(struct netif *interface) {
+    enet_prefix snapshot;volatile uint32_t *descriptor;
+    if(!interface || !interface->state)return 0;
+    memcpy(&snapshot,interface->state,sizeof(snapshot));
+    if(!snapshot.rx_descriptors || snapshot.rx_index<0 || snapshot.rx_index>=16)return 0;
+    descriptor=snapshot.rx_descriptors+snapshot.rx_index*4;
+    memdcbf((void *)descriptor,16);
+    return !(__builtin_bswap32(descriptor[1])&0x80000000u);
+}
