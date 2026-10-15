@@ -55,3 +55,7 @@ video-benchmarks:
 .PHONY: native-video-stream-test
 native-video-stream-test: native-test
 	python3 tests/native_video_server.py
+
+.PHONY: xenon-audio-test
+xenon-audio-test:
+	$(MAKE) -C platform/xenon audio-test

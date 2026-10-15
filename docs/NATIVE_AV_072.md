@@ -1,5 +1,7 @@
 # XenonFin 0.7.2 — receive servicing and rebuffer diagnostics
 
+**Historical build with a confirmed audio regression.** The 0.7.2 sound-driver “repair” below failed on hardware and is withdrawn in [0.7.3](NATIVE_AUDIO_073.md). Its control-register host model assumed hardware behavior it could not prove. Do not use this build for audio acceptance.
+
 The user reports HDMI directly to the TV: real movie sound and pictures play in sync while PLAYING, then REBUFFERING freezes video and drains sound; playback eventually recovers, but can later fail with **HTTP idle timeout**. The 440 Hz test was unavailable because video had not been stopped. This does **not** establish a broken HDMI route or a cold-boot audio failure. The reported processing/interval averages (17.65/35.52 ms) do not identify the slow pipeline stage; the latter measures picture presentation intervals, not Ethernet polling frequency.
 
 Rebuffering holds the consumed-audio/video timeline until playable data is available again. HTTP idle timeout is a separate transport watchdog: eight seconds without observed receive/request-ACK progress, excluding time when a retained packet cannot fit in the application buffer. Neither message alone identifies the server, cable, decoder or DMA as the cause.

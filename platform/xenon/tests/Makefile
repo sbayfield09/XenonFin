@@ -37,7 +37,6 @@ $(OUT)/network-tests: network_tests.c ../native_net.c $(COMMON) ../native_net.h 
 $(OUT)/init-tests: init_tests.c ../init_guard.c ../driver_guard.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include init_tests.c ../init_guard.c -o $@
 test: $(OUT)/video-source-tests $(OUT)/video-native-tests $(OUT)/video-tests $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-protocol-tests $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests
-	$(OUT)/sound-native-tests
 	$(OUT)/sound-diag-tests
 	$(OUT)/video-audio-tests
 	$(OUT)/jvideo-fault-tests
@@ -99,8 +98,6 @@ all test: $(OUT)/video-audio-tests
 $(OUT)/video-audio-tests: video_audio_tests.c ../video_audio.c ../audio_decode.c ../protocol.c ../json.c ../video_audio.h ../audio_decode.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include video_audio_tests.c ../video_audio.c ../audio_decode.c ../protocol.c ../json.c -o $@
 
-all test: $(OUT)/sound-native-tests $(OUT)/sound-diag-tests
-$(OUT)/sound-native-tests: sound_native_tests.c sound_host.h ../third_party/libxenon_sound/sound.c | $(OUT)
-	$(HOST_CC) $(CFLAGS) -DXF_SOUND_HOST_TEST -I. -I$(DEVKITXENON)/usr/include sound_native_tests.c ../third_party/libxenon_sound/sound.c -o $@
-$(OUT)/sound-diag-tests: sound_diag_tests.c ../sound_diag.c ../sound_diag.h ../music.h | $(OUT)
-	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include sound_diag_tests.c ../sound_diag.c -o $@
+all test: $(OUT)/sound-diag-tests
+$(OUT)/sound-diag-tests: sound_diag_tests.c ../sound_diag.c ../sound_diag.h ../sound_sine_table.h ../music.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include sound_diag_tests.c ../sound_diag.c -lm -o $@

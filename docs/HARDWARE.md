@@ -1,5 +1,10 @@
 # Xbox 360 acceptance checklist
 
+## Native 0.7.3 audio regression rollback
+
+Real hardware found that 0.7.2 corrupts both the PCM tone and movie audio. The sound-driver override and its control/reset changes are removed; both new ELFs link the original pinned `libxenon.a(sound.o)` used by earlier working releases. An isolated PCM ELF excludes networking/codecs/video/A/V code and measures verified sine samples and consumed-DMA timing. **First gate: clean, correctly pitched 440 Hz on the console, still pending.** [Backend comparison, diagnostics and ordered tests](NATIVE_AUDIO_073.md). Video/streaming/decoder/scheduler sources are unchanged. Historical 0.7.2 host tests did not validate the physical hardware-control assumption.
+
+
 ## Native 0.7.2 receive/rebuffer update
 
 The user confirms real HDMI movie audio/video are in sync while PLAYING, but repeated rebuffering eventually ends in an HTTP idle timeout. The earlier missing 440 Hz tone was caused by active video ownership. Version 0.7.2 batches pending Ethernet RX descriptors with a bounded service budget, services networking around codec/UI work, retries reopened receive-window updates, and preserves rebuffer/TCP snapshots. It also repairs an independently verified sound-driver control-register read and provides a cooperative tone/idle reset. [Source findings, evidence and hardware procedure](NATIVE_AV_072.md). **Continuous Xbox playback and the new driver/network changes still require physical testing.** Earlier release results below are historical.

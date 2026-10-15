@@ -1,0 +1,147 @@
+{
+  "physical_xbox_tested": false,
+  "driver": "unmodified pinned libxenon.a(sound.o)",
+  "sound_object_sha256": "9a569f3a768d93da6a5ea9e4d3091a12b62b9ea1a9f41d0d5fc2d16b713d9692",
+  "sdk_format": "48000 Hz signed 16-bit little-endian interleaved stereo; 4 bytes/frame",
+  "builds": [
+    {
+      "name": "xenonfin-boot",
+      "isolated": false,
+      "dma_physical_addresses": {
+        "descr": "0xa0000",
+        "buffer": "0xa0100"
+      }
+    },
+    {
+      "name": "xenonfin-audio-test",
+      "isolated": true,
+      "dma_physical_addresses": {
+        "descr": "0x40000",
+        "buffer": "0x40100"
+      }
+    }
+  ],
+  "version": "0.7.3",
+  "pcm_tests": {
+    "normal": "PASS",
+    "asan_ubsan": "PASS",
+    "independent_packed_pcm": {
+      "physical_xbox_tested": false,
+      "rate": 48000,
+      "bits": 16,
+      "channels": 2,
+      "interleaved": "L,R",
+      "byte_order": "little",
+      "runs": [
+        {
+          "name": "440-stereo",
+          "left_hz": 440,
+          "right_hz": 440,
+          "positive_crossings": [
+            440,
+            440
+          ],
+          "frames": 48000,
+          "all_samples_match_sine": true
+        },
+        {
+          "name": "880-stereo",
+          "left_hz": 880,
+          "right_hz": 880,
+          "positive_crossings": [
+            880,
+            880
+          ],
+          "frames": 48000,
+          "all_samples_match_sine": true
+        },
+        {
+          "name": "1000-stereo",
+          "left_hz": 1000,
+          "right_hz": 1000,
+          "positive_crossings": [
+            1000,
+            1000
+          ],
+          "frames": 48000,
+          "all_samples_match_sine": true
+        },
+        {
+          "name": "silence",
+          "left_hz": 0,
+          "right_hz": 0,
+          "positive_crossings": [
+            0,
+            0
+          ],
+          "frames": 48000,
+          "all_samples_match_sine": true
+        },
+        {
+          "name": "440-left",
+          "left_hz": 440,
+          "right_hz": 0,
+          "positive_crossings": [
+            440,
+            0
+          ],
+          "frames": 48000,
+          "all_samples_match_sine": true
+        },
+        {
+          "name": "440-right",
+          "left_hz": 0,
+          "right_hz": 440,
+          "positive_crossings": [
+            0,
+            440
+          ],
+          "frames": 48000,
+          "all_samples_match_sine": true
+        },
+        {
+          "name": "440-left-880-right",
+          "left_hz": 440,
+          "right_hz": 880,
+          "positive_crossings": [
+            440,
+            880
+          ],
+          "frames": 48000,
+          "all_samples_match_sine": true
+        }
+      ]
+    },
+    "simulated_continuous_seconds": 60,
+    "simulated_rates": [
+      48000,
+      24000
+    ],
+    "measured_hardware_rate": null,
+    "backwards_consumption_counter": "PASS: monotonic displayed position, invalidated rate estimate, explicit fault count"
+  },
+  "unchanged_from_072": {
+    "platform/xenon/video.c": "3b84fd29896cc5afcfb050d02f69c3825c3cbb3238c78aa3ed75994acfba20fe",
+    "platform/xenon/video.h": "5a32ec0712065645f74e282d7445efbeabb66f442282f0ff4d26bf270a887ea8",
+    "platform/xenon/video_audio.c": "f174cdb18bdc36ee6fd55f209a57201c92bb6dcafd42e73fe283559a9951d3e7",
+    "platform/xenon/video_audio.h": "e9c6e694df483788f9a1f7ec12cbf864101cbad1a81eb276cd7ae52685c84e8d",
+    "platform/xenon/video_decode.c": "eb43704332a0deb9559cce000c06e2f4cd59fcbef2a8e9bbaeee5b73b2afb3c7",
+    "platform/xenon/video_decode.h": "30f78aa97595b7ebd81b13a931601ba1477c9c085b655d941b79726936294ca3",
+    "platform/xenon/video_native.c": "e0cb2148d625736e5dbd11ae2cfe3499be062fedb19ebfcb1ca5eec763e3b893",
+    "platform/xenon/video_native.h": "9d4dd7d0fdbbfc3b3b7dd28f8019c2a476f6a293ede901dc33c88dcbdc23cbb8",
+    "platform/xenon/video_pixels.c": "fd4324b5acb02b3ddf53a1ca8d1f92d3a7f8849f9b34f7f68a5a63beddece32a",
+    "platform/xenon/video_pixels.h": "a4230865c816156b6158e71f4285d9dc245e290e20e1c197778ce8cd613e2d7b",
+    "platform/xenon/video_ps.c": "770d01143060f641d1ddc71291347b49fed3f996173a9753cb97874a9c8b1dc0",
+    "platform/xenon/video_ps.h": "2b5059848107032b0d9af95b6f5199f9bd8599ecf90fd81410f0af3735f34d34",
+    "platform/xenon/video_sync.c": "00e3eecd87ecfdca2279dd0e9e76fb7bf68bdc1d3e572de93cbc45ed1389f0c6",
+    "platform/xenon/video_sync.h": "b59d190bb7aa89495903713148dfc37d1e17ddb707cf0e7345e259a8f2956a02",
+    "platform/xenon/video_api.c": "d818f2ede536feb4d4c6132fb2826c1d9c676b835e0647020acc7b255cb73cdf",
+    "platform/xenon/jvideo.c": "70a0178ec0a5cd2998a5d9ef8c33ed5cb537bf5670a4800260fb0d1eb85b19b4",
+    "platform/xenon/jvideo.h": "a662107db8e9b894afbfb7480e1b2b55cad44ce2764e55597d5950a8f8e8dbd2",
+    "platform/xenon/tcp_client.c": "187a685351388618f99b169040db8dbaf7e4139451a314289c8e3b70c6ff9f0a",
+    "platform/xenon/native_net.c": "d39887469759a90a42611f6eeda02082bfb5b1b2191e126d56c05c78b514976a",
+    "platform/xenon/audio_decode.c": "f8ca1ab50e790ebfe3aaa247c1406466743923989a92004d5be0db89120f5b56",
+    "platform/xenon/music.c": "8a821b1ac31f6d7b7de70b075ff4ec4a603e4c220ff72549e5a96f47ca1665ce"
+  },
+  "acceptance_gate": "PENDING: clean correctly pitched 440 Hz sine on physical Xbox; do not advance to later audio stages until confirmed."
+}

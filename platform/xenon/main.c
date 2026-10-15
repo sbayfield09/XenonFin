@@ -38,7 +38,6 @@ static xf_browser browser;
 enum { SECTION_COUNT = sizeof(sections)/sizeof(*sections) };
 static xf_music music;
 static xf_sound_diag sound_test;
-static unsigned audio_resets;
 static xf_video video;
 static xf_jvideo jvideo;
 static xf_item selected_video;
@@ -448,13 +447,14 @@ static void draw_video(void) {
     }
 }
 static void draw_audio(void) {
-    uint32_t base=read32(0xea001600),status=read32(0xea001604),control=read32(0xea001608);
-    extern int xenos_is_hdmi;
-    printf("\n  A: 440 Hz stereo PCM test   Y: reset IDLE audio\n");
-    printf("  Route %s | 48000 Hz S16LE stereo | resets %u\n",xenos_is_hdmi?"HDMI":"analogue",audio_resets);
-    printf("  DMA base %08x control %08x status %08x\n",base,control,status);
-    printf("  Queued %d free %d bytes | read %u last %u remain %u\n",xenon_sound_get_unplayed(),xenon_sound_get_free(),status&31,(status>>8)&31,status>>16);
-    printf("  Tone frames %u/9600 submitted %u bytes state %u\n",sound_test.frames,sound_test.submitted,sound_test.state);
+    uint32_t status=read32(0xea001604);
+    printf("\n  Restored original pinned libXenon audio backend.\n");
+    printf("  A: start   X: cycle PCM test   Y: 1s / 60s\n");
+    printf("  %s / %us | PCM verified %u hash %08x\n",xf_sound_diag_name(sound_test.mode),sound_test.seconds,sound_test.verified,sound_test.pcm_hash);
+    printf("  48000 Hz signed S16LE stereo / 4 bytes per frame\n");
+    printf("  Frames %u/%u consumed %u DMA %u underruns %u\n",sound_test.frames,sound_test.target_frames,sound_test.played,sound_test.queued,sound_test.underruns);
+    printf("  Base %08x control %08x status %08x\n",read32(0xea001600),read32(0xea001608),status);
+    printf("  Full isolation: boot xenonfin-xell-audio-test.elf.\n");
     wrapped(sound_test.message,0,3);
 }
 static void draw(int selected) {
@@ -463,7 +463,7 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.7.2 - XeLL / Jellyfin video\n");
+    printf("\n  XENONFIN 0.7.3 - XeLL / Jellyfin video\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < SECTION_COUNT; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
@@ -531,7 +531,7 @@ int main(void) {
     for (;;) {
         uint64_t loop_start=xf_monotonic_us();
         uint32_t now = (uint32_t)(loop_start/1000); char direction = 0, move = 0;
-        xf_sound_diag_tick(&sound_test,now);
+        xf_sound_diag_tick_us(&sound_test,loop_start);
         xf_jvideo_service(&jvideo,now);
         service_network(now);
         xf_http_tick(&http, now, xf_network_ready());
@@ -576,7 +576,10 @@ int main(void) {
             if (selected == 6 && (move == 'L' || move == 'R')) { browse_request(move == 'R' ? XF_NEXT : XF_PREVIOUS, now); redraw = 1; }
             if (selected == 7 && (move == 'L' || move == 'R')) { xf_music_skip(&music, move == 'R' ? 1 : -1, now); redraw = 1; }
             if (pad.b && !previous.b) {
-                if (http.active) { xf_http_cancel(&http); handle_result(); }
+                if(xf_sound_diag_active(&sound_test))xf_sound_diag_stop(&sound_test);
+                else if(sound_test.state==XF_TONE_ERROR && xenon_sound_get_unplayed())
+                    snprintf(sound_test.message,sizeof(sound_test.message),"DMA still owns PCM. Wait for drain; cold boot if stuck.");
+                else if (http.active) { xf_http_cancel(&http); handle_result(); }
                 else if (selected == 6) {
                     if (!browser.details && !browser.depth) selected = 5;
                     else browse_request(XF_BACK, now);
@@ -587,14 +590,9 @@ int main(void) {
                 else { xf_http_cancel(&http); logout(); xf_wipe(password, sizeof(password)); xf_video_stop(&video); xf_console_shutdown(); return 0; }
                 redraw = 1;
             }
-            if(pad.y && !previous.y && selected==2) {
-                if(xf_music_active(&music) || xf_jvideo_active(&jvideo) || xf_sound_diag_active(&sound_test))
-                    snprintf(sound_test.message,sizeof(sound_test.message),"Reset blocked while playback/tone owns audio. Stop and wait first.");
-                else {
-                    xenon_sound_init();++audio_resets;xf_sound_diag_init(&sound_test,&audio);
-                    snprintf(sound_test.message,sizeof(sound_test.message),"Audio reset complete. Press A; check raw control and DMA progress.");
-                }
-                redraw=1;
+            if(selected==2 && !xf_sound_diag_active(&sound_test)) {
+                if(pad.x && !previous.x) {xf_sound_diag_select(&sound_test,(sound_test.mode+1)%XF_SOUND_CASES,sound_test.seconds);redraw=1;}
+                if(pad.y && !previous.y) {xf_sound_diag_select(&sound_test,sound_test.mode,sound_test.seconds==1?60:1);redraw=1;}
             }
             if (pad.y && !previous.y && selected == 4) { begin_edit(1); redraw = 1; }
             if (pad.x && !previous.x && selected == 4) { show_body = !show_body; redraw = 1; }
