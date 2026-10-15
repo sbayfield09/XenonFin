@@ -22,6 +22,9 @@
 #include "ui_clock.h"
 #include "video_native.h"
 #include "framebuffer.h"
+#include "timing.h"
+/* Application UI output goes directly to the composed text frame. */
+#define printf xf_console_printf
 
 static const char *sections[] = {
     "Graphics / controller", "Network / DHCP diagnostics", "Audio output",
@@ -52,7 +55,7 @@ uint64_t xf_monotonic_us(void) {
         asm volatile ("mftbl %0" : "=r" (low));
         asm volatile ("mftbu %0" : "=r" (check));
     } while (high != check);
-    return (((uint64_t)high << 32) | low) / (PPC_TIMEBASE_FREQ / 1000000);
+    return xf_ticks_to_us(((uint64_t)high << 32) | low,PPC_TIMEBASE_FREQ);
 }
 uint32_t xf_monotonic_ms(void) { return (uint32_t)(xf_monotonic_us()/1000); }
 static void logout(void) {
@@ -283,33 +286,60 @@ static void video_line(const char *format, ...) {
     va_start(arguments,format); vsnprintf(text,sizeof(text),format,arguments); va_end(arguments);
     xf_text_cell(cell,sizeof(cell),text,text_width); printf("  %s\n",cell);
 }
+static void video_save_trace(void) {
+    char path[128],source[128],error[180];const char *colon;
+    if(xf_video_active(&video) || xf_music_active(&music) || xenon_sound_get_unplayed()) {snprintf(video.message,sizeof(video.message),"Stop video/music before saving CSV.");return;}
+    snprintf(source,sizeof(source),"%s",video.path);
+    if(!source[0] && !xf_video_local_path(source,sizeof(source),error,sizeof(error))) {
+        snprintf(video.message,sizeof(video.message),"CSV needs the FAT USB test clip present.");return;
+    }
+    colon=strchr(source,':');
+    if(!colon) {snprintf(video.message,sizeof(video.message),"No mounted USB volume for CSV.");return;}
+    snprintf(path,sizeof(path),"%.*s/xenonfin-video.csv",(int)(colon-source+1),source);
+    snprintf(video.message,sizeof(video.message),"%s",xf_video_export(&video,path)?"Saved USB root xenonfin-video.csv (overwrites previous trace).":"CSV write failed; keep USB inserted.");
+}
 static void draw_video(void) {
     unsigned x,y,w,h,footer;
-    video_line("A: CPU/pause Y: GPU X: stop B: back Up/Down: bars L/R: stats");
-    video_line("%s | %ux%u | source %.3f FPS | %s",video.codec->name,video.info.width,video.info.height,video.info.fps,
-        video.paused?"PAUSED":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED");
+    const xf_video_render_stats *m=video.backend.stats;
+    video_line("A CPU/pause Y GPU X stop B back L/R stats LT late RT sync");
+    video_line("%s %ux%u %.3f FPS | %s | stats %u/6",video.codec->name,video.info.width,video.info.height,video.info.fps,
+        video.paused?"PAUSED":video.state==XF_VIDEO_LOADING?"LOADING":video.state==XF_VIDEO_PLAYING?"PLAYING":video.state==XF_VIDEO_ENDED?"END":"STOPPED",video_metrics_page+1);
     video_line("%s",video.message);
     if(video.state==XF_VIDEO_LOADING) video_line("File: %u / %u bytes (maximum 8 MiB)",(unsigned)video.loaded,(unsigned)video.size);
-    if(!xf_framebuffer_video_area(&x,&y,&w,&h,&footer)) { printf("  Display too small for video canvas plus diagnostics.\n"); return; }
+    if(!xf_framebuffer_video_area(&x,&y,&w,&h,&footer)) return;
     while((unsigned)xf_console_cursor_y()<footer) printf("\n");
-    {
-        const xf_video_render_stats *m=video.backend.stats;
-        video_line("FPS %u.%03u avg %.2f | dec %u shown %u drop %u",video.fps_milli/1000,video.fps_milli%1000,
-            video.timeline_us && video.rendered>1?(double)(video.rendered-1)*1000000/video.timeline_us:0,video.decoded,video.rendered,video.dropped);
-        if(!video_metrics_page) {
-            video_line("ms D %.2f Cv %.2f Up %.2f | L/R: metrics",video_avg(video.decode_us,video.decoded),
-                m?video_avg(m->conversion_us,m->prepared):0,m?video_avg(m->upload_us,m->prepared):0);
-            video_line("Cmd %.2f GPU<=%.2f (poll %.2f) Copy %.2f ms",m?video_avg(m->commands_us,m->prepared):0,
-                m?video_avg(m->gpu_observed_us,m->gpu_completed):0,m?video_avg(m->gpu_poll_gap_us,m->gpu_completed):0,
-                m?video_avg(m->copy_us,m->presented):0);
-            video_line("Q %u/%u peak %u + prep %u | VSync 0 (off)",video.count,XF_VIDEO_QUEUE,video.max_occupancy,video.pending);
-        } else {
-            video_line("Demux 0 (ES) Qcopy %.2f UI %.2f Wait %.2f ms",video_avg(video.queue_copy_us,video.decoded),
-                video_avg(video.ui_us,video.ui_frames),video_avg(video.wait_us,video.loop_count));
-            video_line("Dmax %.2f ms | service %.1f%% | starvation %u",(double)video.max_decode_us/1000,
-                video.loop_us+video.wait_us?100.0*video.loop_us/(video.loop_us+video.wait_us):0,video.starved);
-            video_line("%s",video.backend.format?video.backend.format:"Up/Down: CPU/GPU bars; L/R metrics");
+    video_line("FPS %u.%03u avg %.2f | dec %u shown %u drop %u",video.fps_milli/1000,video.fps_milli%1000,
+        video.timeline_us && video.rendered>1?(double)(video.rendered-1)*1000000/video.timeline_us:0,video.decoded,video.rendered,video.dropped);
+    if(video_metrics_page==0) {
+        video_line("ms D %.2f Cv %.2f Up %.2f Cmd %.2f",video_avg(video.decode_us,video.decoded),
+            m?video_avg(m->conversion_us,m->prepared):0,m?video_avg(m->upload_us,m->prepared):0,m?video_avg(m->commands_us,m->prepared):0);
+        video_line("GPU<=%.2f poll %.2f Copy %.2f VWait %.2f ms",m?video_avg(m->gpu_observed_us,m->gpu_completed):0,
+            m?video_avg(m->gpu_poll_gap_us,m->gpu_completed):0,m?video_avg(m->copy_us,m->presented):0,video_avg(video.sync.wait_us,video.rendered));
+        video_line("Q %u/%u peak %u prep %u | next sync %u late %.1f ms",video.count,XF_VIDEO_QUEUE,video.max_occupancy,video.pending,video.next_sync_mode,(double)video.next_late_threshold_us/1000);
+    } else if(video_metrics_page==1) {
+        video_line("Drops late %u overflow %u decode %u gpu %u eos %u",video.drop_reason[0],video.drop_reason[1],video.drop_reason[2],video.drop_reason[3],video.drop_reason[4]);
+        video_line("Events: decode fault %u GPU stall %u EOF %u full %u",video.decode_failures,video.gpu_stalls,video.eof_events,video.full_ticks);
+        video_line("Drop late avg %.2f p95 %.2f max %.2f ms",video_avg(video.drop_lateness.sum,video.drop_lateness.count),(double)xf_time_p95(&video.drop_lateness)/1000,(double)video.drop_lateness.max/1000);
+    } else if(video_metrics_page==2) {
+        video_line("Clock %.3f PTS %.3f drift %+.2f ms | back %u",(double)video.timeline_us/1000000,(double)video.last_present_pts/1000000,(double)video.drift_us/1000,video.clock_faults);
+        video_line("Late avg %.2f p95 %.2f max %.2f ms",video_avg(video.lateness.sum,video.lateness.count),(double)xf_time_p95(&video.lateness)/1000,(double)video.lateness.max/1000);
+        video_line("Sync %u sampled %.1f Hz fault %u halfReject %u",video.sync.mode,video.sync.period_us?1000000.0/video.sync.period_us:0,video.sync.faults,video.sync.half_rejected);
+    } else if(video_metrics_page==3) {
+        video_line("Proc<= avg %.2f p95 %.2f max %.2f ms",video_avg(video.frame_span.sum,video.frame_span.count),(double)xf_time_p95(&video.frame_span)/1000,(double)video.frame_span.max/1000);
+        video_line("CPU/frame avg %.2f p95 %.2f max %.2f ms",video_avg(video.processing.sum,video.processing.count),(double)xf_time_p95(&video.processing)/1000,(double)video.processing.max/1000);
+        video_line("Interval avg %.2f p95 %.2f max %.2f ms",video_avg(video.intervals.sum,video.intervals.count),(double)xf_time_p95(&video.intervals)/1000,(double)video.intervals.max/1000);
+    } else if(video_metrics_page==4) {
+        unsigned seen=0,i,limit=video.trace_count>XF_VIDEO_TRACE?XF_VIDEO_TRACE:video.trace_count;
+        for(i=0;i<limit && seen<3;++i) {
+            const xf_video_trace *t=&video.trace[(video.trace_count-1-i)%XF_VIDEO_TRACE];
+            if(t->reason<XF_DROP_REASONS) {video_line("Drop reason %u PTS %.3f late %.2f work %.2f ms",t->reason,(double)t->pts/1000000,(double)t->lateness/1000,(double)t->processing/1000);++seen;}
         }
+        if(!seen) video_line("No drops logged. R-stick saves CSV after END/STOP.");
+        if(seen<3) video_line("Trace %u overwritten %u cancel %u starve %u",video.trace_count,video.trace_overwritten,video.cancelled,video.starved);
+    } else {
+        video_line("UI avg %.2f p95 %.2f max %.2f ms",video_avg(video.ui_times.sum,video.ui_times.count),(double)xf_time_p95(&video.ui_times)/1000,(double)video.ui_times.max/1000);
+        video_line("Loop avg %.2f p95 %.2f max %.2f ms",video_avg(video.loop_times.sum,video.loop_times.count),(double)xf_time_p95(&video.loop_times)/1000,(double)video.loop_times.max/1000);
+        video_line("Wait %.2f ms starve %u Qfull %u cancel %u",video_avg(video.wait_us,video.loop_count),video.starved,video.full_ticks,video.cancelled);
     }
 }
 static void draw(int selected) {
@@ -318,7 +348,7 @@ static void draw(int selected) {
     console_get_dimensions(&width, NULL); text_width = width > 6 ? width - 6 : 32;
     if (text_width > 100) text_width = 100;
     console_set_colors(0xff101624, 0xffe6eaf4); xf_console_begin();
-    printf("\n  XENONFIN 0.5.1 - XeLL / local video test\n");
+    printf("\n  XENONFIN 0.5.2 - XeLL / local video test\n");
     if (editing) { draw_keyboard(); wrapped(result, 0, 3); xf_console_end(); return; }
     if (selected >= 6) printf("  > %s (LB/RB: sections; Back/View: player)\n", sections[selected]);
     else for (i = 0; i < SECTION_COUNT; ++i) printf("  %c %s\n", i == selected ? '>' : ' ', sections[i]);
@@ -438,7 +468,15 @@ int main(void) {
                 if ((pad.start && !previous.start) || (pad.a && !previous.a)) { xf_music_pause(&music); redraw = 1; }
             }
             if(selected==8) {
-                if(move=='L' || move=='R') { video_metrics_page^=1; redraw=1; }
+                if(move=='L' || move=='R') { video_metrics_page=(video_metrics_page+(move=='R'?1:5))%6; redraw=1; }
+                if(!xf_video_active(&video)) {
+                    if(pad.rt>128 && previous.rt<=128) {xf_video_options(&video,(video.next_sync_mode+1)%3,video.next_late_threshold_us);redraw=1;}
+                    if(pad.lt>128 && previous.lt<=128) {
+                        uint64_t late=video.next_late_threshold_us==0?66667:video.next_late_threshold_us==66667?100000:video.next_late_threshold_us==100000?200000:0;
+                        xf_video_options(&video,video.next_sync_mode,late);redraw=1;
+                    }
+                    if(pad.s2_z && !previous.s2_z) {video_save_trace();redraw=1;}
+                }
                 if((move=='U' || move=='D') && !xf_video_active(&video)) { start_video_colours(move=='D'); redraw=1; }
                 if(pad.x && !previous.x) { xf_video_stop(&video); redraw=1; }
                 if(pad.start && !previous.start) { xf_video_pause(&video,now); redraw=1; }
@@ -472,22 +510,24 @@ int main(void) {
         /* Presentation never waits on GPU acknowledgement, decoding or HTTP.
          * Dirty controller/data events persist while a flip is pending. Only
          * visible statistics get timer updates, at most four per second. */
+        xf_video_service(&video);
         xf_console_poll(now);
-        if (xf_console_ready() && xf_ui_due(&ui_clock, now, redraw,
+        if (xf_console_ready() && (redraw || xf_video_ui_safe(&video)) && xf_ui_due(&ui_clock, now, redraw,
                 !editing && (selected == 1 || selected == 7 || selected == 8 || http.active))) {
             uint64_t ui_start=xf_monotonic_us();
             draw(selected); xf_ui_rendered(&ui_clock, now); redraw = 0;
-            if(selected==8 && video.state==XF_VIDEO_PLAYING) { video.ui_us+=xf_monotonic_us()-ui_start; ++video.ui_frames; }
+            if(selected==8 && video.state==XF_VIDEO_PLAYING) { uint64_t cost=xf_monotonic_us()-ui_start;video.ui_us+=cost;++video.ui_frames;xf_time_add(&video.ui_times,cost); }
         }
+        xf_video_service(&video);
         previous = pad;
         {
             uint64_t wait_start=xf_monotonic_us();
             unsigned wait=xf_video_wait_us(&video);
             /* Retain the original music/menu cadence. Only the silent video
-             * test uses bounded, deadline-aware 1..4 ms cooperative waits. */
-            udelay((int)wait);
+             * test uses deadline-aware waits; due work never adds a sleep. */
+            if(wait) udelay((int)wait);
             if(video.state==XF_VIDEO_PLAYING && !video.paused && video.clock_started) {
-                video.loop_us+=wait_start-loop_start; video.wait_us+=xf_monotonic_us()-wait_start; ++video.loop_count;
+                xf_time_add(&video.loop_times,wait_start-loop_start);video.loop_us+=wait_start-loop_start; video.wait_us+=xf_monotonic_us()-wait_start; ++video.loop_count;
             }
         }
     }

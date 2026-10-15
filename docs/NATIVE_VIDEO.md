@@ -1,83 +1,96 @@
-# XenonFin 0.5.1 — video colour and timing hardware test
+# XenonFin 0.5.2 — frame timing and drop diagnosis
 
-The user tested 0.5 on a real Xbox 360: local MPEG-1 decoding and both CPU and Xenos video paths display 320×240/30 video. CPU colours are incorrect. Reported decode time is 3.1–3.4 ms, old aggregate presentation time 17–18 ms, rendered FPS 15–25, with drops of 18/41 and 36/234. **The 0.5.1 changes below compile and pass host tests; their colour correctness and sustained frame rate still require physical Xbox verification.** Existing Jellyfin login/browsing, HTTP, MP3 decoding/streaming/output and the text flicker fix remain in place. This test has no video audio or Jellyfin video streaming.
+The user confirmed corrected CPU colours and working MPEG-1 decoding/GPU rendering on a real Xbox 360 in 0.5.1. At 720×480/30 FPS the reported result was 240 decoded, 218 presented, 22 dropped, 27.23 average FPS, approximately correct clip duration; decode 10.54 ms, upload 1.34 ms, GPU observation approximately 1.39 ms, copy 2.88 ms, VSync off. **0.5.2 fixes verified software defects and adds diagnostics; sustained 30 FPS and its new VBlank modes still require console testing.** Jellyfin login/browsing, MP3/network streaming, audio, controller and the working text/video graphics paths remain in place.
 
-## Download and hardware test
+## Downloads and first hardware comparison
 
-Download [XeLL ELF](../dist/xenonfin-xell-video.elf), [boot archive](../dist/xenonfin-xbox-boot-diagnostic.tar.gz), and [three benchmark clips](../dist/xenonfin-video-benchmarks.tar.gz). Check `dist/SHA256SUMS`. Extracting the archives preserves the exact `.m1v` filename if a browser saves a raw MPEG download with a `.mpeg` extension. The unchanged 0.5 build remains available in Git commit `d65c5ef`; [0.4.2](../dist/xenonfin-xell-music-fix.elf) remains the stable music rollback.
+- [XeLL-compatible PowerPC ELF](../dist/xenonfin-xell-video.elf)
+- [Boot archive, containing xenon.elf and the exact test filename](../dist/xenonfin-xbox-boot-diagnostic.tar.gz)
+- [320×240, 640×360 and 720×480, eight-second 30 FPS clips](../dist/xenonfin-video-benchmarks.tar.gz)
+- [Complete source archive](../dist/xenonfin-source.tar.gz), checksums in `dist/SHA256SUMS`
 
-1. Copy the new ELF to FAT32 USB as **xenon.elf**, boot through XeLL, and check the title **0.5.1**. Open **Local video test** using LB/RB. Stop music first. An active music/PCM or HTTP request prevents starting video.
-2. With the player stopped, press **Up** for synthetic CPU colour bars. No file is needed. Expected order is **black, white, red, green, blue, cyan, magenta, yellow**. These are known BT.601 YUV vectors passed through the normal queue, conversion, tiled staging and framebuffer copy. Check solid colours, black/white levels and borders. **Down** repeats the identical test through the GPU shader. Bars remain visible at END; X stops. Record both results, especially red/blue and green.
-3. Extract the benchmark archive. Copy **320x240/xenonfin-test.m1v** to USB root as **xenonfin-test.m1v**. Keep the USB inserted. Press **A** for CPU playback, or **Y** from STOP/END for Xenos. Each clip is eight seconds, 30 FPS, 240 silent frames. Check actual moving video, colours, aspect and timing. Compare both paths using the same clip. Do not judge playback solely from increasing counters.
-4. **A/Start** pauses/resumes, **X** stops, **B** returns to Libraries; LB/RB also stops before changing section. Pause freezes publication and the playback clock. An in-flight GPU preparation may finish privately during pause. Resume excludes the paused interval. Confirm stopping and returning leave text stable.
-5. **Left/Right** switches the two diagnostic pages. Record both pages at END, after a complete uninterrupted run. Repeat the 320×240 test several times; aim for approximately 30 FPS with zero sustained drops before advancing. “Shown” counts completed framebuffer publications, not independently observed panel refreshes.
-6. Only after the first result is recorded, replace the root file with **640x360/xenonfin-test.m1v**, then **720x480/xenonfin-test.m1v**, and repeat CPU/GPU tests. These are increased test limits, not promised console performance. The source can be 720×480 while the reserved aspect-fitted output canvas remains at most 640×384.
-7. Return to Libraries, verify existing authentication/navigation, stream an MP3, exercise pause/skip/stop, and check audible output and playback reports. No music/network implementation or audio initialization changes were made.
+Extracting the archive preserves `.m1v` if a browser renames a raw download `.mpeg`. Copy the ELF as **xenon.elf** and one profile's clip as **xenonfin-test.m1v** to the FAT32 USB root. Keep the USB inserted. Boot through the established XeLL procedure and check the title **0.5.2**. Keep the previous build from commit `4386dcf` for a direct comparison, and the unchanged [0.4.2 music rollback](../dist/xenonfin-xell-music-fix.elf).
 
-Record console model, cable, **actual display mode/refresh rate** from the display, ELF revision, renderer and source dimensions. A 50 Hz display cannot show 30 FPS with even refresh cadence; 60 Hz can repeat each source frame twice. This presenter uses timestamped writes into the existing scanout, with **no VSync wait and no framebuffer swaps**. It makes no assumption that display refresh is 60 Hz, and does not claim tear-free publication or measure panel refresh. A changing register or a VSync acknowledgement cannot freeze the menu.
+1. Open **Local video test** with LB/RB. Stop music first. Initially use **sync 0/off**, **late 100 ms**, the default settings shown on statistics page 1. Start the supplied 720×480 clip using **Y** to repeat the reported GPU workload. A starts the CPU path; Up/Down shows CPU/GPU known colour bars from STOP/END.
+2. Let all eight seconds finish without pausing or navigating. Target approximately 30 FPS, 240 presented, minimal/zero late drops, and a small final phase error. Record **all six statistics pages** using Left/Right. The final frame and totals remain at END.
+3. Press the **right stick (R3)** to save **xenonfin-video.csv** to the USB root. Copy it to your development computer and give it a distinct name for each run. Saving deliberately overwrites that diagnostic file and is permitted only with video/music stopped. No file logging or serial output is performed by the application UI during playback.
+4. While stopped, **LT** cycles the *next run's* lateness setting: 100 → 200 → **0/never drop late** → 66.667 → 100 ms. Run sync-off once at 0 to test whether every frame can be shown without accumulating drift or extending the clip. A zero drop counter with a slow clock/long clip is not success. Then compare 66.667, 100 and 200 ms if there are still outliers. Options do not reset the completed run's measurements or CSV metadata.
+5. On a **60 Hz display**, use **RT** while stopped to cycle the next run's sync mode **0/off → 1/on → 2/every second refresh → off**. Replay the same clip and save a separate CSV after each mode. Record sampled refresh, VSync fault/halfReject, interval statistics, phase error and drops. A fallback is not a successful VSync measurement. Modes and caveats are explained below.
+6. Repeat at 320×240 first if 720×480 remains inconsistent, then 640×360. Each supplied clip has 240 frames at 30 FPS. Record console model, cable, actual display mode/refresh and ELF revision. Test pause/resume separately with A/Start; X stops, B returns to Libraries. Verify Jellyfin login/library navigation and audible MP3 playback, pause/skip/stop and reports after the video runs.
 
-| Source (30 FPS) | Renderer | Average/last FPS | Decoded/shown/dropped | Decode / conversion ms | Upload / commands ms | GPU bound / poll uncertainty ms | Copy / UI / wait ms | Queue peak / starvation |
-|---|---|---|---|---|---|---|---|---|
-| 320×240 | CPU, then GPU | Hardware pending | Pending | Pending | Pending | Pending | Pending | Pending |
-| 640×360 | CPU, then GPU | Hardware pending | Pending | Pending | Pending | Pending | Pending | Pending |
-| 720×480 | CPU, then GPU | Hardware pending | Pending | Pending | Pending | Pending | Pending | Pending |
+| Source, 30 FPS | Sync | FPS / dec / shown / reasoned drops | CPU / preparation max and p95 | UI / interval max and p95 | Phase / VWait / refresh / faults |
+|---|---|---|---|---|---|
+| 320×240 | off / on / half at 60 Hz | Hardware pending | Pending | Pending | Pending |
+| 640×360 | off / on / half at 60 Hz | Hardware pending | Pending | Pending | Pending |
+| 720×480 | off / on / half at 60 Hz | Hardware pending | Pending | Pending | Pending |
 
-**GPU initialization limitation:** the existing upstream `Xe_Init()`/`edram_init()` can wait on hardware or abort on allocation failure. Initialization is still opt-in (Y or Down) and can require a reboot if it fails. After initialization, scratch-writeback completion is polled cooperatively with a 250 ms watchdog. On timeout, private resources are retained, the test stops, and CPU/menu operation remains available. Reboot before retrying a failed GPU. FAT mount/read calls can still block inside upstream USB drivers; keep the drive inserted.
+## Two verified defects in 0.5.1
 
-## Verified colour correction
+**Timer scaling:** the pinned `ppc/timebase.h` defines `PPC_TIMEBASE_FREQ = 3192000000 / 64 = 49,875,000 Hz`. The old expression divided the timebase by `PPC_TIMEBASE_FREQ / 1000000`, which integer-truncated to **49**, rather than 49.875. One real second therefore became **1,017,857 microseconds**, a clock approximately **1.7857% fast**. It made deadlines early and reported durations slightly high. The coherent high/low/high timebase read was already correct and is retained. `xf_ticks_to_us()` now uses quotient/remainder scaling with the complete frequency; it avoids multiplication overflow for long uptimes. Tests cover this exact frequency and 100 days of uptime. This uses libXenon's nominal hardware frequency, not an independent oscillator calibration.
 
-The pinned libXenon `drivers/console/console.c`, `console_pset()`, writes `(b<<24)+(g<<16)+(r<<8)` into the same original framebuffer used here. **On big-endian Xenon this is the word `0xBBGGRR00`, with memory bytes B,G,R,X.** `XE_FMT_BGRA|XE_FMT_8888` is a component/memory format name; it does not mean a CPU-native `0xAARRGGBB` word. Version 0.5 wrote `0xFFRRGGBB`, giving incorrect component positions. White alone would not expose the error. `xf_video_bgra()` now follows the console's proven packing exactly; black is zero. UI colours/format are untouched.
+**Blocking diagnostic output:** the pinned `drivers/newlib/newlib.c::vfs_console_write()` calls the framebuffer hook, then sends **every byte to UART `putch()`**. `drivers/xenon_uart/xenon_uart.c::putch()` waits for transmitter readiness. Capturing `stdout_hook` did not bypass those waits. Four-Hz multi-line UI output could therefore interrupt presentation outside the previously reported per-frame timings. The application now calls `xf_console_printf()`: inside an active composed text frame it formats into a bounded 2 KiB buffer and feeds the character compositor directly. Outside a frame it retains normal vprintf/serial behavior. Other driver logging is unchanged. Host tests model the serial path and verify that composed application text never enters it. The existing main-page format strings fit the bound; library metadata still uses its existing bounded character/wrap helpers.
 
-The plane audit follows pointers rather than assumed storage order: pl_mpeg internally stores Y, Cr, Cb, but exposes named `frame->y`, `frame->cb`, `frame->cr` fields. `video_decode.c` uses those named pointers and padded plane widths. The queue copies active rows into Y, Cb, Cr regions and gives explicit compact strides. CPU chroma indexing uses `sx/2,sy/2`; GPU textures receive Y/Cb/Cr in that order with each surface's actual byte pitch. No U/V swap was necessary.
+These defects are established by source inspection and tests. **They do not prove a complete allocation of the 22 hardware drops to individual causes.** Old totals lacked per-drop timestamps, processing tails and UI latency; the next hardware CSV establishes remaining causes.
 
-The coefficients remain BT.601 limited range for SD MPEG-1: subtract 16 from Y and 128 from Cb/Cr; use `298*Y + 409*Cr` for red, `298*Y - 100*Cb - 208*Cr` for green, `298*Y + 516*Cb` for blue, round/shift by eight and saturate. Reference red is Y/Cb/Cr 81/90/240, green 145/54/34, blue 41/240/110. Tests cover all eight bars, poisoned padding, scaling and explicit emulation of PowerPC stores on the little-endian host. A compressed RGB-patch fixture goes through the actual MPEG decoder, CPU tiled converter and unpacked PPC bytes; comparison to FFmpeg RGB24 gives mean error **0.487/255**, maximum **3/255**.
+## Absolute timeline and scheduling
 
-Staging stays private and 128-byte aligned. Finished 32-row tile bands are copied to tile-aligned destinations, cache-stored and ordered with `sync`. GPU targets are invalidated only after the resolve fence completes. YUV upload cache maintenance is handled by the existing surface lock/unlock API. No audio/NIC cache operations or display-address registers are changed.
+The playback clock is computed as **origin PTS + (current monotonic time − origin time − accumulated user pauses)**. It is not advanced by integer frame durations, accumulated sleep requests or loop counters. The origin is set after the first publication, after file loading, GPU initialization and preroll; those initial costs never advance playback. Pauses during preroll are also excluded. Backward clock samples are counted and clamped rather than causing an unsigned jump.
 
-CPU conversion also avoids repeated divisions/conversion for every scaled pixel: source-column mapping is computed once and an RGB scanline is converted once per source row, then reused during scaling. This is a measured-stage optimisation to validate on hardware, not an assumed frame-rate result.
+MPEG-1 rate codes are mapped to exact rational rates: 24000/1001, 24/1, 25/1, 30000/1001, 30/1. Each output PTS is independently calculated from its frame index and rate, rounded once to microseconds. At 30 FPS the sequence is 0, 33333, 66667, 100000 …; there is no accumulation of rounded 33 ms or 33333 µs durations. The wrapper no longer uses pl_mpeg's rounded `29.970`/`23.976` decimal rate for timestamps. Decoded and presented PTS are checked for strict ordering, including reordered I/P/B clips.
 
-## Scheduling and presentation diagnosis
+The queue stays at **four decoded slots**, plus one private prepared picture. There is no blind buffer-size increase or new decoder thread/toolchain. `xf_video_service()` performs presentation-only work and never invokes decoding or waits for hardware. The main loop services it before and after controller/UI work. `xf_video_tick()` separately performs at most one cooperative decode call when there is queue capacity and sufficient deadline slack. A rolling decode-cost estimate plus a 3 ms margin avoids starting a non-preemptible decode near a ready picture's deadline. The estimate is capped so a single large I-frame cannot prevent all future decoding; actual spikes remain visible in max/p95 statistics. Decoder calls cannot themselves be preempted by this bare-metal application.
 
-The old player started conversion/upload only when a frame was already due. GPU readiness was observed around a fixed **10 ms** main-loop delay. Its single “present” measurement included command construction, asynchronous work, polling delay and final framebuffer copy; **it was not a GPU execution or VSync measurement**. The two-slot queue had little decoded-frame headroom. Separately, each changing UI frame compared whole multi-megabyte CPU surfaces, even though only statistics glyphs changed. These are confirmed code-level costs; their exact share of the reported 17–18 ms and hardware drops cannot be determined from those aggregate numbers alone.
+UI timer redraws defer near a video deadline using measured UI p95 plus a margin; controller-triggered updates remain immediate. Statistics retain approximately four-Hz cadence and complete-frame composition. The working changed-cache-line presenter, colours, cache operations, planar texture upload, reused textures/private GPU resolve and framebuffer copy are preserved.
 
-Version 0.5.1 separates three backend operations:
+The next wait is calculated from the absolute deadline **after work has consumed time**. Due presentation/decode work returns a zero wait. Early frames wait only toward their deadline, with cooperative polling capped at 4 ms (0.5 ms when sampling VBlank); asynchronous GPU waits use bounded polling. There is no compulsory extra sleep after each displayed frame, sub-millisecond deadline spin, or new audio-path sleep. libXenon's `udelay()` is a low-priority hardware-thread timebase wait, not an OS idle/scheduler API; none is claimed.
 
-- `submit`: convert into private CPU memory, or upload planar textures and submit a private GPU resolve **ahead of its PTS**.
-- `poll`: observe private readiness without touching scanout. GPU completion is asynchronous; the watchdog does not spin.
-- `present`: copy the complete ready picture only when its timestamp is due.
+Late dropping defaults to **100 ms** and can be disabled or changed with LT. A picture is discarded only when **strictly later than the selected threshold and a newer queued picture is already due**. Queue fullness or a few milliseconds of lateness never triggers a drop. Reference pictures continue decoding, the final picture is published, and EOF drains queued/private pictures before END. No clock rebasing or slowing is used to conceal lateness.
 
-The player uses the existing **64-bit monotonic microsecond clock**, sampled again after decode/preparation. It no longer schedules against the main loop's stale millisecond timestamp. Four decoded YUV slots (2,073,600 bytes maximum at 720×480) plus one private prepared picture provide lookahead. Loading/initialization/preroll are excluded from playback time. Preroll fills the queue or reaches EOF before starting the clock; one decode call per iteration keeps other services running. The source decoder supplies ordered PTS from the MPEG header's frame rate, including 29.97 FPS. No early publication, arbitrary timestamp rewriting, slow-motion clock correction, or queue-length-based dropping is used.
+## Drop accounting, traces and timing definitions
 
-A frame can be discarded only if it is **more than two source periods late AND a newer queued frame is already due**. References still decode. The final picture is displayed and held. Full/paused queues stop decoding. The video-only loop uses bounded, deadline-aware **1–4 ms** waits/polls; the original music/menu 10 ms cadence remains. libXenon's `udelay` lowers hardware-thread priority while polling its timebase; this bare-metal runtime supplies no task scheduler for a timed OS sleep. No sub-millisecond spin, unbounded decode catch-up or new audio-path delay is introduced. The wait metric is time spent there, **not proof of idle CPU**.
+Six pages share FPS, decoded, presented and total dropped counters. Left/Right selects the remaining information:
 
-Text still uses the tested changed-cache-line presenter. Two dirty bitmaps now restrict pixel comparisons to cache lines touched in either CPU source, including reverted/erased glyphs. It no longer reads both whole framebuffers for every 4 Hz statistics update. Complete glyphs remain composed before copy; there is no visible erase-only pass. Existing rendering regressions cover static text/video preservation and page restoration.
-
-GPU input textures, vertex buffer and private resolve target are allocated once per geometry and reused. There is no CPU RGB conversion on that path, no texture creation per frame, no `Xe_Sync()` and no scanout swap. `Xe_pBlockUntilIdle()` emits a GPU ordering packet; despite its name it does **not** spin the CPU. It precedes the completion token so resolved data is safe to copy. The old redundant per-frame `Xe_Clear()` resolve is removed: the normal resolve clears EDRAM for the next frame; the explicit initial clear remains. Output copies and cache invalidation are still required by the stable UI architecture.
-
-## Diagnostic meanings
-
-Both pages update at the established approximately **4 Hz** cadence. Values are accumulated per run and retained at END/STOP.
-
-| Label | Meaning |
+| Page | Diagnostics |
 |---|---|
-| FPS / avg | Last one-second publication rate / `(shown-1)/active timeline`. Priming and pauses are excluded from the average; dropped frames lower it. |
-| D / Dmax | Average/maximum codec call time for output frames, excluding queue copies. Elementary MPEG has no container demux: the displayed demux time is explicitly zero; bitstream parsing is part of decode. |
-| Cv | CPU colour conversion, scaling and tiled staging per prepared frame. Zero on GPU. |
-| Up | YUV texture row copy and surface unlock/cache stores per prepared frame. Zero on CPU. |
-| Cmd | GPU vertex/state/draw/resolve/fence command construction and submission, separate from asynchronous completion. |
-| GPU<= / poll | Average wall-clock time from GPU submission to observed fence completion, and its polling uncertainty. Actual completion lies between the last negative and first positive poll. These are bounds, not precise GPU hardware timestamps. The libXenon API used here has no timestamp-query support. |
-| Copy | Cache invalidation if GPU, completed tile-band publication and cache stores per shown frame. No conversion, frame wait or VSync included. |
-| VSync 0 (off) | No VSync API, retrace wait, display-counter wait or framebuffer flip occurs in this path. Zero describes the absence of waiting; it is not measured refresh latency. |
-| Q / prep | Decoded queue occupancy/capacity/peak plus a separately prepared/pending picture. |
-| Qcopy | Active Y/Cb/Cr rows copied out of padded decoder planes into a queue slot. |
-| UI | Whole UI capture/composition/publication average per UI redraw. |
-| Wait | Average actual cooperative wait duration per running main-loop iteration, excluding decode, GPU work and UI. |
-| service % | Measured main-loop work / (work + wait). **Not total CPU utilisation**: waits use a timebase loop and other Xenon hardware threads are not profiled. |
-| starvation | Running iterations with neither queued nor prepared output after the service step, before EOF. |
+| 1 | Decode, conversion, upload, command submission, GPU completion observation bound/poll uncertainty, framebuffer copy, VSync gate wait, queue/peak/private preparation, next-run settings. |
+| 2 | Drops by **late, overflow, decode, GPU, EOS**; decode-failure/GPU-stall/EOF events; full-queue backpressure; average/p95/maximum dropped-frame lateness. |
+| 3 | Absolute playback clock, last presented PTS, signed **drift/phase error**, backward samples; presented-frame lateness average/p95/max; requested sync, sampled refresh, sync faults and half-rate rejection. |
+| 4 | Frame preparation span upper bound average/p95/max; CPU work per frame average/p95/max; actual completed-publication interval average/p95/max. |
+| 5 | Last three dropped-frame records (reason 0=late, 1=overflow, 2=decode, 3=GPU, 4=EOS), PTS, lateness and work; trace/cancel/starvation counts. Full records are in CSV. |
+| 6 | UI and main-loop work average/p95/max, average cooperative wait, queue starvation/backpressure and cancelled pictures. |
 
-## Generate and build
+- **FPS** counts completed framebuffer publications; it does not independently count physical panel scanouts. Average FPS excludes startup and pauses. Publication interval statistics use monotonic wall time; a pause appears as a long interval, hence uninterrupted benchmark instructions.
+- **CPU/frame** sums measured decoding, queue copies, submit/poll calls and framebuffer publication for a picture. It excludes intentional waits, queue residence and asynchronous GPU execution.
+- **Proc<=** adds decode/queue copy to elapsed preparation until observed readiness and final framebuffer copy. It excludes intentional PTS/VSync holding and queue residence, but includes asynchronous completion polling uncertainty and can include overlapping decode/UI work. It is a conservative preparation-span measure, not a GPU hardware timestamp or total CPU utilisation. For a picture discarded before preparation completes, records describe work completed so far.
+- **p95** uses an all-run histogram with **0.25 ms upper-edge bins**, not a small rolling sample. Maxima are exact timer measurements. If p95 falls in the histogram's ≥255.75 ms overflow bin, it reports the observed maximum rather than silently capping it. CPU/frame, preparation span, lateness, drop lateness, interval, UI and loop tails are recorded without allocation.
+- **Drift** is completed-publication clock minus its source PTS. It measures presentation phase/lag, **not independently calibrated hardware oscillator drift**. Comparing phase across the run, frame intervals and an external stopwatch distinguishes jitter from sustained lag. The final source PTS of 240 frames at 30 FPS is 7.966667 seconds; the last picture remains held.
+- **GPU<=/poll** retain the fence observation bound and read-bracket uncertainty. GPU, VSync gate waiting, UI and timebase waiting are separate metrics. No precise hardware GPU query is claimed.
+- **Overflow drops remain zero by design:** the producer stops at four slots; `Qfull` counts backpressure, not dropped pictures. Decode/GPU fault events are separate from pictures discarded because of those faults. A failure attributes already decoded queued/private pictures to its reason; an incomplete failed decode does not increment decoded. Normal EOF records one event and drains pictures, so EOS drops are zero. User stop records cancelled pictures separately, outside performance-drop totals.
+- The RAM trace retains the last **4096 publication/drop records**, with explicit overwritten-record counts; all events fit for the supplied 240-frame tests. Every retained drop contains its source PTS, absolute timeline and measured lateness. CSV also includes work, preparation span, occupancy, settings, reason counts, faults, phase and percentile summaries. There is no file/serial log per frame. Tests exercise trace wrapping with 5000 pictures and accounting `decoded = presented + dropped + queued + pending + cancelled` as applicable.
 
-Create all three benchmark clips with `make video-benchmarks` or `bash scripts/make_video_benchmarks.sh`. Each subdirectory contains the exact root filename. Exact FFmpeg command for the first benchmark:
+## VSync comparison without blocking or double-waiting
+
+The native backend supplies one **read-only** VBlank sample using the same `0x6534 & 0x1000` status used by libXenon's `Xe_IsVBlank()`. It does not initialize Xenos for a CPU test or wait for an acknowledgement. The generic service detects observed rising edges and estimates refresh from a median of valid sampled 12–25 ms intervals. Missed-edge multiples are excluded; it is a sampled estimate, not an exact display-controller timestamp.
+
+- **0/off:** publish a ready picture when its PTS is due. No VBlank status reads, retrace wait or scanout swaps.
+- **1/on:** after PTS is due, publish on an observed active VBlank, at most once per observed blank.
+- **2/half:** calibrate at least four valid intervals, then require two observed refresh edges between publications. Intended for approximately 60 Hz (15–18.5 ms estimated periods). A detected different refresh sets **halfReject** and explicitly uses mode-1 gating. It does not call a 50 Hz half-rate run “30 FPS”.
+
+If the gate cannot observe sufficient retrace progress for **100 ms**, it increments the sync fault count and falls back to timestamp-only mode for that run. UI/controller service continues and no acknowledgement can permanently freeze rendering. A decoder/UI operation can still make a narrow blank pulse unobservable; fault, interval, refresh and trace data make that limitation visible. Confirm zero sync faults/halfReject before comparing successful modes. First-frame calibration is part of startup, outside the playback clock.
+
+**This is VBlank-start copy gating, not a hardware page flip.** The stable UI uses the original scanout, and a roughly 2.88 ms video copy can exceed a blanking window. Therefore enabled gating does not promise tear-free scanout. No second VSync wait exists inside framebuffer copy or GPU resolve. No display-address swaps or the previous failed flip-acknowledgement path are reintroduced. These modes build and pass simulated retrace tests; their real sampling reliability and cadence require the physical comparison above.
+
+## Preserved format and renderer limits
+
+CPU pixels retain the verified PowerPC word **0xBBGGRR00**, bytes B,G,R,X, following pinned libXenon `console_pset()`. Y, named Cb/Cr pointers, padded/compact strides, 4:2:0 indexing and BT.601 limited-range coefficients are unchanged. Known RGB patches through actual MPEG decoding/tiled conversion still compare to FFmpeg within mean 0.487/255 and max 3/255. GPU textures are reused and no CPU RGB conversion is introduced on that path. Private staging, aligned tile-band copies, cache stores/invalidations and completed-glyph UI publication remain unchanged.
+
+Input is local **MPEG-1 elementary video**, 144 bytes–8 MiB, even dimensions through 720×480, 23.976–30 FPS, compressed picture ≤128 KiB, unchanged geometry/rate/aspect. No video audio, Jellyfin video, artwork, MPEG-2/H.264/MP4 or program streams are added. The actual libfat USB mounts remain uda/udb/udc with `usb2mass_ops_0/1/2`; no FATX/HDD assumption. Keep USB inserted: upstream mount/read/write calls can block. CSV writes occur only after stopping audio/video.
+
+Opt-in GPU initialization still uses upstream `Xe_Init()`/`edram_init()` hardware waits/fatal allocation paths; an initialization failure can require reboot. Per-frame GPU completion retains its 250 ms watchdog and private-resource retention on failure. The new VBlank gate has an independent recoverable timeout. The decoder arena remains 2 MiB, queue remains approximately 2 MiB maximum, and linked static memory remains below 30 MiB, including bounded trace/histograms.
+
+## Generate, build and validation
+
+`make video-benchmarks` generates the three 240-frame clips. For 320×240:
 
 ```sh
 ffmpeg -hide_banner -loglevel error \
@@ -86,7 +99,7 @@ ffmpeg -hide_banner -loglevel error \
   -aspect 4:3 -f mpeg1video xenonfin-test.m1v
 ```
 
-For 640×360 use `size=640x360:rate=30` and `-aspect 16:9`; for 720×480 use `size=720x480:rate=30` and `-aspect 3:2` (square pixels for this diagnostic). Replace the output file deliberately. The input must be MPEG-1 **elementary** video, not a program stream/MP4/MPEG-2 file renamed to `.m1v`. Limits: **8 MiB**, even dimensions through **720×480**, **23.976–30 FPS**, compressed picture ≤128 KiB, unchanged sequence geometry/rate/aspect. Start with `-bf 0`; reordered I/P/B clips also pass tests.
+Use `size=640x360:rate=30`, `-aspect 16:9` for 640×360, or `size=720x480:rate=30`, `-aspect 3:2` for the square-pixel 720×480 benchmark. Output scales to the existing aspect-fitted maximum 640×384 canvas. Renaming a program stream does not convert it to elementary video.
 
 ```sh
 DEVKITXENON=/workspace/setup/devkit make xenon
@@ -100,14 +113,10 @@ make video-test-file video-benchmarks
 bash scripts/package.sh
 ```
 
-The toolchain, libfat USB source and XeLL ELF conversion are unchanged. The maximum decoded queue is approximately 2 MiB; decoder arena remains 2 MiB; total linked static memory is below 30 MiB. Sources use real libXenon APIs; hosted mocks are test-only.
+Host tests include the exact old timer regression, fractional-rate PTS, priming/pause/rollover, ordered deadlines, configurable/disabled late drops, reason accounting, 4096-record wrapping, CSV, bounded waiting, simulated 60 Hz gating/half-rate and 50 Hz rejection, stuck-signal fallback, serial-free UI capture, textures and cache-line UI preservation. A model with 10.54 ms decode plus I-frame spikes, 1.34 ms upload, 1.39 ms asynchronous completion, 2.88 ms copy and 20 ms UI stalls at 4 Hz publishes all 240 frames without drops at the expected duration. This is host logic evidence, not a measured Xbox result.
 
-## Decoder provenance and host evidence
+Real codec comparisons retain strict FFmpeg YUV tolerances through 720×480/30, including reordered 29.97 FPS and colour fixtures, normally and under ASan/UBSan. Real Jellyfin authentication, library navigation and MP3 streaming/output/reporting integration passes. The actual ELF is cross-built using the existing toolchain and packaged with source. **Physical 0.5.2 frame rate, tails, retrace behavior and remaining-drop attribution are pending.**
 
-The original investigation selected MIT `pl_mpeg` (`c871f2be022ece7ef4f64230b4fb8e1fb9eb6023`) for a scalar PowerPC MPEG-1 decoder, and reused the GPL XMPlayer YUV/pass-through shader arrays (`5fc2fb330bfb58bd2806fed6c63f6ae917cb3a3c`). Full MPlayer/FFmpeg ports were inspected, not transplanted. The actual FAT source uses installed `fatMountSimple()` and `usb2mass_ops_0/1/2` on uda/udb/udc; no FATX/HDD access is assumed. See [THIRD_PARTY.md](THIRD_PARTY.md) and the vendored `SOURCE.md` for hashes/licences.
+## Provenance
 
-The two 0.5 pl_mpeg fixes preserve fixed-memory bytes/EOF without quadratic shifts and flush the final future reference after trailing B pictures. A **third, EOF-only fix** in 0.5.1 permits the slice's 23-bit nonzero lookahead to inspect fewer remaining bits at fixed-memory EOF. A complete final macroblock in the 720×480 fixture was previously skipped despite containing valid short codes; appending a sequence-end marker independently isolated the cause. The change reads only available bits and preserves streaming-buffer semantics. The strict FFmpeg pixel threshold was retained.
-
-Real compressed fixtures pass: 240/240 frames at 320×240/30; 48/48 at 640×360/24 with B pictures; 60/60 at 320×240/29.97 with B pictures; 60/60 at 640×360/30; 60/60 at 720×480/30. All compare to FFmpeg below 1/255 mean absolute YUV error and 32/255 maximum (actual maxima 7–10). Native PTS and padded-plane checks pass. The compressed RGB-patch comparison is described above.
-
-Scheduler tests model 3.3 ms decode, 12 ms synchronous preparation or asynchronous GPU completion, 2 ms copy, and 20 ms UI updates at 4 Hz. All 240 frames are published without drops at the correct duration at 30 and 29.97 FPS in that model; this **does not predict actual console throughput**. Tests also exercise early-frame holding, independent clock sampling, startup, pause, rollover, genuine late drops, backpressure, faults, stop, synthetic bars, texture allocation reuse, plane pitch/order, private resolves, completion uncertainty, watchdog recovery, text stability and USB loading. Normal and ASan/UBSan suites plus real Jellyfin authentication/browsing/music integration are the required build checks. Physical performance rows above remain pending.
+MIT `pl_mpeg` remains pinned to `c871f2be022ece7ef4f64230b4fb8e1fb9eb6023`, with the existing three documented EOF/fixed-memory patches; no new upstream edits in 0.5.2. Exact rational output timing lives in the XenonFin wrapper. The GPL XMPlayer shader arrays remain pinned to `5fc2fb330bfb58bd2806fed6c63f6ae917cb3a3c`; full MPlayer/FFmpeg ports were investigated, not transplanted. See [THIRD_PARTY.md](THIRD_PARTY.md) and vendored `SOURCE.md` for hashes/notices. The original native toolchain and XeLL ELF conversion remain unchanged.

@@ -59,13 +59,13 @@ $(OUT)/framebuffer-tests: framebuffer_tests.c ../framebuffer.c ../framebuffer.h 
 	$(HOST_CC) $(CFLAGS) -DXF_FRAMEBUFFER_HOST_TEST -I$(DEVKITXENON)/usr/include framebuffer_tests.c ../framebuffer.c ../console_frame.c -o $@
 
 $(OUT)/console-adapter-tests: console_adapter_tests.c ../console_batch.c ../console_frame.c ../console_batch.h ../console_frame.h ../framebuffer.h | $(OUT)
-	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include console_adapter_tests.c ../console_batch.c ../console_frame.c -o $@
+	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include console_adapter_tests.c ../console_batch.c ../console_frame.c -Wl,--wrap=vprintf -Wl,--wrap=vfprintf -o $@
 
-$(OUT)/video-probe: video_probe.c ../video_decode.c ../video_pixels.c ../video_pixels.h ../video_decode.h ../third_party/pl_mpeg/pl_mpeg.h | $(OUT)
+$(OUT)/video-probe: video_probe.c ../video_decode.c ../video_pixels.c ../video_pixels.h ../video_decode.h ../timing.h ../third_party/pl_mpeg/pl_mpeg.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) video_probe.c ../video_decode.c ../video_pixels.c -lm -o $@
 
-$(OUT)/video-tests: video_tests.c ../video.c ../video_pixels.c ../video.h ../video_decode.h ../video_pixels.h | $(OUT)
-	$(HOST_CC) $(CFLAGS) video_tests.c ../video.c ../video_pixels.c -o $@
+$(OUT)/video-tests: video_tests.c ../video.c ../video_sync.c ../video_pixels.c ../video.h ../video_decode.h ../video_pixels.h ../timing.h ../video_sync.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) video_tests.c ../video.c ../video_sync.c ../video_pixels.c -o $@
 
 $(OUT)/video-native-tests: video_native_tests.c ../video_native.c ../video_pixels.c ../video_native.h ../video_pixels.h ../video.h ../video_decode.h ../third_party/xmplayer_yuv_shaders.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include video_native_tests.c ../video_native.c ../video_pixels.c -o $@

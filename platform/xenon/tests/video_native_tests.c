@@ -18,6 +18,7 @@ static unsigned shader_count,inits,blits,invalidations,draws,reclaims,steps,allo
 static uint64_t now;
 static uint32_t token;
 static int automatically_complete=1;
+uint32_t xenos_read32(int reg) {CHECK(reg==0x6534);return 0x1000;}
 uint64_t xf_monotonic_us(void) { return now; }
 int xf_framebuffer_video_area(unsigned *x,unsigned *y,unsigned *w,unsigned *h,unsigned *footer) {*x=32;*y=128;*w=640;*h=384;*footer=33;return 1;}
 int xf_framebuffer_video_copy(const void *pixels,unsigned x,unsigned y,unsigned w,unsigned h) {
@@ -81,7 +82,7 @@ int main(void) {
     memset(y,235,sizeof(y));memset(cb,128,sizeof(cb));memset(cr,128,sizeof(cr));
     xf_video_native_backend(&backend,0);CHECK(backend.begin(NULL,&info,message,sizeof(message)));
     CHECK(backend.submit(NULL,&image,message,sizeof(message)) && backend.poll(NULL,message,sizeof(message))==1);
-    CHECK(blits==0 && !inits);CHECK(backend.present(NULL,message,sizeof(message)) && blits==1);backend.end(NULL);CHECK(invalidations==1);
+    CHECK(backend.vblank(NULL)==1);CHECK(blits==0 && !inits);CHECK(backend.present(NULL,message,sizeof(message)) && blits==1);backend.end(NULL);CHECK(invalidations==1);
     memset(cb,77,sizeof(cb));memset(cr,199,sizeof(cr));
     xf_video_native_backend(&backend,1);CHECK(backend.begin(NULL,&info,message,sizeof(message)));
     CHECK(inits==1 && blits==1);CHECK(backend.submit(NULL,&image,message,sizeof(message)));CHECK(blits==1);

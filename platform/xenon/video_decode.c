@@ -1,4 +1,5 @@
 #include "video_decode.h"
+#include "timing.h"
 #include <stdio.h>
 #include <string.h>
 #include <setjmp.h>
@@ -23,7 +24,8 @@ static void *video_realloc(void *p, size_t size) { (void)p; (void)size; longjmp(
 #include "third_party/pl_mpeg/pl_mpeg.h"
 static plm_video_t *decoder;
 static int opened;
-static void close_decoder(void) { decoder=NULL; allocated=0; opened=0; }
+static unsigned output_frames, rate_num, rate_den;
+static void close_decoder(void) { decoder=NULL; allocated=0; opened=0; output_frames=0; }
 static int reject(char *error, size_t cap, const char *message) { snprintf(error,cap,"%s",message); return 0; }
 /* Restrict this bring-up decoder to locally generated, small elementary video.
  * Validate EVERY repeated sequence header before allowing library allocation.
@@ -63,7 +65,13 @@ static int open_decoder(unsigned char *data, size_t size, xf_video_info *info, c
     buffer=plm_buffer_create_with_memory(data,size,0);
     decoder=plm_video_create_with_buffer(buffer,1);
     if(!plm_video_has_header(decoder)) { close_decoder(); return reject(error,cap,"Truncated MPEG-1 sequence header."); }
-    info->fps=plm_video_get_framerate(decoder); info->pixel_aspect=plm_video_get_pixel_aspect_ratio(decoder);
+    {
+        static const unsigned num[]={0,24000,24,25,30000,30}, den[]={1,1001,1,1,1001,1};
+        unsigned rate=data[7]&15;
+        rate_num=num[rate]; rate_den=den[rate];
+        info->fps=(double)rate_num/rate_den;
+    }
+    info->pixel_aspect=plm_video_get_pixel_aspect_ratio(decoder);
     opened=1; return 1;
 }
 static int next_frame(xf_video_image *image, char *error, size_t cap) {
@@ -78,6 +86,6 @@ static int next_frame(xf_video_image *image, char *error, size_t cap) {
     image->width=frame->width; image->height=frame->height;
     image->y=frame->y.data; image->cb=frame->cb.data; image->cr=frame->cr.data;
     image->y_stride=frame->y.width; image->c_stride=frame->cb.width;
-    image->pts_us=(uint64_t)(frame->time*1000000.0+0.5); return 1;
+    image->pts_us=xf_frame_pts(output_frames++,rate_num,rate_den); return 1;
 }
 const xf_video_codec xf_mpeg1_codec={"MPEG-1 / pl_mpeg",open_decoder,next_frame,close_decoder};

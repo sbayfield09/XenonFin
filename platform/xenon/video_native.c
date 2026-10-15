@@ -11,6 +11,7 @@
 #include <string.h>
 #include "third_party/xmplayer_yuv_shaders.h"
 extern uint64_t xf_monotonic_us(void);
+extern uint32_t xenos_read32(int);
 extern void Xe_pStep(struct XenosDevice *, int);
 extern void Xe_pBlockUntilIdle(struct XenosDevice *);
 static struct {
@@ -26,6 +27,7 @@ static struct {
     unsigned video_width,video_height;
 } native;
 static uint32_t cpu_pixels[640*384] __attribute__((aligned(128)));
+static int vblank(void *context) { (void)context; return !!(xenos_read32(0x6534)&0x1000); }
 static uint64_t clock_us(void *context) { (void)context; return xf_monotonic_us(); }
 static int error(char *text, size_t size, const char *message) { snprintf(text,size,"%s",message); return 0; }
 static int gpu_done(void) {
@@ -174,6 +176,6 @@ static void end(void *context) {
 void xf_video_native_backend(xf_video_backend *backend, int gpu) {
     native.gpu=gpu;
     backend->begin=begin; backend->submit=submit; backend->poll=poll; backend->end=end; backend->microseconds=clock_us; backend->context=NULL;
-    backend->present=present; backend->stats=&native.stats;
+    backend->present=present; backend->stats=&native.stats; backend->vblank=vblank;
     backend->format=gpu?"Xenos Y/U/V textures -> tiled BGRA":"CPU BT.601 -> B,G,R,X / BE BBGGRR00";
 }
