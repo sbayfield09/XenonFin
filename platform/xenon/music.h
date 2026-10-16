@@ -4,11 +4,7 @@
 #include "browse.h"
 #include "audio_decode.h"
 #include "music_api.h"
-typedef struct {
-    int (*queued)(void *), (*available)(void *);
-    void (*submit)(void *, const unsigned char *, size_t);
-    void *context;
-} xf_audio_backend;
+#include "audio_output.h"
 enum xf_music_state { XF_MUSIC_IDLE, XF_MUSIC_NEGOTIATING, XF_MUSIC_BUFFERING, XF_MUSIC_PLAYING, XF_MUSIC_DRAINING, XF_MUSIC_FINISHED, XF_MUSIC_ERROR };
 typedef struct {
     xf_http_client stream, control;

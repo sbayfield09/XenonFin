@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "posix_tcp.h"
+#include "../audio_native.h"
 #include "../music.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,15 +18,20 @@ static uint32_t last_tick;
 static uint64_t wall_ms(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return(uint64_t)t.tv_sec*1000+(unsigned)t.tv_nsec/1000000;}
 static int available(void *p){(void)p;return 65536-(int)hw_bytes;}
 static int queued(void *p){(void)p;return(int)hw_bytes;}
-static void submit(void *p,const unsigned char *bytes,size_t size){
+static int submit(void *p,const unsigned char *bytes,size_t size){
     size_t i;(void)p;CHECK(size%2048==0&&hw_bytes+size<=32768);hw_bytes+=(unsigned)size;audio_total+=size/4;++submissions;
     for(i=0;i<size;i+=2){int16_t sample=(int16_t)((unsigned)bytes[i]|((unsigned)bytes[i+1]<<8));energy+=(uint64_t)((int64_t)sample*sample);}
-}
+return 1;}
+void xenon_sound_init(void){}
+int xenon_sound_get_unplayed(void){return queued(NULL);}
+int xenon_sound_get_free(void){return available(NULL);}
+void xenon_sound_submit(void *bytes,int size){CHECK(submit(NULL,bytes,(size_t)size));}
+uint32_t xf_test_audio_status(void){return (uint32_t)(((audio_total*4-hw_bytes)/2048)&31);}
 static uint32_t step(void){
     struct timespec delay={0,2000000};uint32_t now=(uint32_t)(wall_ms()-wall_start),elapsed=now-last_tick;
     unsigned drained=elapsed>1000?192000:elapsed*192;
     if(drained>hw_bytes)drained=hw_bytes;
-    hw_bytes-=drained;last_tick=now;xf_test_tcp_poll();xf_music_tick(&music,now,1);nanosleep(&delay,NULL);return now;
+    hw_bytes-=drained;last_tick=now;xf_audio_native_service((uint64_t)now*1000);xf_test_tcp_poll();xf_music_tick(&music,now,1);nanosleep(&delay,NULL);return now;
 }
 static void wait_ms(unsigned duration){uint64_t end=wall_ms()+duration;while(wall_ms()<end){step();CHECK(!music.session_expired&&music.state!=XF_MUSIC_ERROR);}}
 static void request(enum xf_browse_action action){
@@ -49,10 +55,10 @@ static void stop(void){
     CHECK(music.state==XF_MUSIC_FINISHED&&!hw_bytes&&music.sent_stop&&music.report_status==204&&!music.report_message[0]);
 }
 int main(int argc,char **argv){
-    xf_audio_backend backend={queued,available,submit,NULL};char error[128],ids[3][65];unsigned i;uint64_t position,pause_position;
+    xf_audio_backend backend;char error[128],ids[3][65];unsigned i;uint64_t position,pause_position;
     token=getenv("JELLYFIN_ACCESS_TOKEN");user=getenv("JELLYFIN_USER_ID");
     CHECK(argc==2&&token&&user&&xf_endpoint_parse(argv[1],&endpoint,error,sizeof(error)));
-    xf_music_init(&music,&backend);xf_http_init(&api);xf_browser_init(&browser);xf_test_tcp_init(&endpoint);wall_start=wall_ms();
+    xf_audio_native_init(&backend);xf_music_init(&music,&backend);xf_http_init(&api);xf_browser_init(&browser);xf_test_tcp_init(&endpoint);wall_start=wall_ms();
     request(XF_ROOT);for(i=0;i<browser.page.count;++i)if(!strcmp(browser.page.items[i].collection,"music"))break;
     CHECK(i<browser.page.count);browser.current.selected=i;request(XF_OPEN);CHECK(browser.page.count&& !strcmp(browser.page.items[0].type,"MusicArtist"));
     request(XF_OPEN);CHECK(browser.page.count&&!strcmp(browser.page.items[0].type,"MusicAlbum"));request(XF_OPEN);CHECK(browser.page.count==3);
@@ -80,5 +86,6 @@ int main(int argc,char **argv){
     }
     CHECK(xf_test_tcp_backpressure()>0);CHECK(energy>100000000&&audio_total>48000*6);
     printf("{\"native_mp3_playback\":true,\"mono_44100\":true,\"stereo_48000\":true,\"flac_to_mp3\":true,\"pause_resume\":true,\"skip_previous\":true,\"natural_end_and_advance\":true,\"reports_204\":true,\"pcm_frames_submitted\":%llu,\"pcm_energy\":%llu,\"backpressure_retries\":%u,\"submissions\":%u}\n",(unsigned long long)audio_total,(unsigned long long)energy,xf_test_tcp_backpressure(),submissions);
+    {const xf_audio_native_metrics *d=xf_audio_native_status();CHECK(!d->failed&&!d->overruns&&!d->format_errors&&d->submitted==d->consumed);}
     xf_music_forget(&music);CHECK(!music.token[0]&&!music.track.id[0]&&!music.decoder.pcm_size);xf_test_tcp_finish();return 0;
 }

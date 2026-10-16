@@ -1,5 +1,10 @@
 # Validation — 14 October 2026
 
+## Native 0.7.4 complete audio integration
+
+The user confirms correct sound from the 0.7.3 standalone test. Version 0.7.4 unifies standalone/tone/music/movie output through the original SDK driver and a shared checked adapter; it adds consumed-audio timestamp-origin alignment without PCM trimming, bounded recovery hysteresis and DMA/decoder diagnostics. The video/transport/demux implementations remain unchanged. [Integration and final hardware test](NATIVE_AV_074.md). **Physical 0.7.4 music/movie continuity and synchronisation remain unverified.** Earlier results below are historical.
+
+
 ## Native 0.7.3 audio regression rollback
 
 Real hardware found that 0.7.2 corrupts both the PCM tone and movie audio. The sound-driver override and its control/reset changes are removed; both new ELFs link the original pinned `libxenon.a(sound.o)` used by earlier working releases. An isolated PCM ELF excludes networking/codecs/video/A/V code and measures verified sine samples and consumed-DMA timing. **First gate: clean, correctly pitched 440 Hz on the console, still pending.** [Backend comparison, diagnostics and ordered tests](NATIVE_AUDIO_073.md). Video/streaming/decoder/scheduler sources are unchanged. Historical 0.7.2 host tests did not validate the physical hardware-control assumption.

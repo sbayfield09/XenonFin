@@ -11,7 +11,7 @@ static const char id[]="11111111111111111111111111111111";
 static const char negotiation[]="{\"PlaySessionId\":\"session\",\"MediaSources\":[{\"Id\":\"source\",\"Protocol\":\"File\",\"Container\":\"mp3\",\"SupportsDirectPlay\":true,\"MediaStreams\":[{\"Type\":\"Audio\",\"Codec\":\"mp3\",\"SampleRate\":44100,\"Channels\":1}]}]}";
 static int queued(void *p){(void)p;return(int)hardware;}
 static int available(void *p){(void)p;return 65536-(int)hardware;}
-static void submit(void *p,const unsigned char *bytes,size_t n){(void)p;(void)bytes;(void)n;CHECK(0);}
+static int submit(void *p,const unsigned char *bytes,size_t n){(void)p;(void)bytes;(void)n;CHECK(0);return 1;}
 static void start(void){
     xf_audio_backend backend={queued,available,submit,NULL};xf_endpoint ep;xf_item track;xf_location location;char error[128];
     xf_music_init(&music,&backend);memset(&track,0,sizeof(track));memset(&location,0,sizeof(location));

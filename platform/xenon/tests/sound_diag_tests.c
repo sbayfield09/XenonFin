@@ -16,7 +16,7 @@ static int reference(unsigned hz,unsigned frame) {
     return hz?(int)floor(6000*sin(6.283185307179586476925286766559*hz*(frame%48000)/48000)+.5):0;
 }
 static int sample(const unsigned char *b){return (int16_t)((unsigned)b[0]|((unsigned)b[1]<<8));}
-static void submit(void *p,const unsigned char *bytes,size_t size) {
+static int submit(void *p,const unsigned char *bytes,size_t size) {
     unsigned i,ch;(void)p;
     CHECK(d.verified && size==2048 && pending+size<=8192 && size<=65536-pending);
     for(i=0;i<512;++i)for(ch=0;ch<2;++ch) {
@@ -28,7 +28,7 @@ static void submit(void *p,const unsigned char *bytes,size_t size) {
         ring[((submitted_frames+i)*4+ch*2+1)%sizeof(ring)]=bytes[i*4+ch*2+1];
     }
     submitted_frames+=512;pending+=(unsigned)size;
-}
+return 1;}
 static void consume(unsigned frames) {
     unsigned i,ch;if(frames>pending/4)frames=pending/4;
     for(i=0;i<frames;++i)for(ch=0;ch<2;++ch) {

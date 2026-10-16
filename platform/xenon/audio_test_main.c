@@ -12,6 +12,7 @@
 #include <pci/io.h>
 #include <time/time.h>
 #include "sound_diag.h"
+#include "audio_native.h"
 #include "console_batch.h"
 #include "timing.h"
 #define printf xf_console_printf
@@ -26,15 +27,12 @@ static uint64_t clock_us(void) {
     return xf_ticks_to_us(((uint64_t)high<<32)|low,PPC_TIMEBASE_FREQ);
 }
 uint32_t xf_monotonic_ms(void){return (uint32_t)(clock_us()/1000);}
-static int queued(void *p){(void)p;return xenon_sound_get_unplayed();}
-static int available(void *p){(void)p;return xenon_sound_get_free();}
-static void submit(void *p,const unsigned char *bytes,size_t size){(void)p;xenon_sound_submit((void *)bytes,(int)size);}
 static void draw(uint64_t now) {
     uint32_t status=read32(0xea001604);uint64_t elapsed;
     extern int xenos_is_hdmi;
     elapsed=test.submitted?((test.finished_at?test.finished_at:now)-test.started_at):0;
     console_set_colors(0xff101624,0xffe6eaf4);xf_console_begin();
-    printf("\n  XENONFIN 0.7.3 - ISOLATED PCM TEST\n\n");
+    printf("\n  XENONFIN 0.7.4 - ISOLATED PCM TEST\n\n");
     printf("  Unmodified pinned libXenon sound.o | %s\n",xenos_is_hdmi?"HDMI":"analogue");
     printf("  No network, codecs, video player or A/V clock.\n\n");
     printf("  Left/Right: select test   Up/Down: 1 or 60 seconds\n");
@@ -57,14 +55,15 @@ static void draw(uint64_t now) {
     xf_console_end();
 }
 int main(void) {
-    xf_audio_backend audio={queued,available,submit,NULL};struct controller_data_s pad,previous;
+    xf_audio_backend audio;struct controller_data_s pad,previous;
     uint32_t drawn=0;int dirty=1;
-    memset(&previous,0,sizeof(previous));xf_sound_diag_init(&test,&audio);
+    memset(&previous,0,sizeof(previous));
     /* Same hardware-tested initialisation order as the application. */
-    xenos_init(VIDEO_MODE_AUTO);console_init();usb_init();xenon_sound_init();
+    xenos_init(VIDEO_MODE_AUTO);console_init();usb_init();xf_audio_native_init(&audio);xf_sound_diag_init(&test,&audio);
     if(!xf_console_init())return 1;
     for(;;) {
         uint64_t now=clock_us();uint32_t ms=(uint32_t)(now/1000);unsigned mode=test.mode,seconds=test.seconds;
+        xf_audio_native_service(now);
         xf_sound_diag_tick_us(&test,now);
         usb_do_poll();memset(&pad,0,sizeof(pad));get_controller_data(&pad,0);
         if(!xf_sound_diag_active(&test)) {

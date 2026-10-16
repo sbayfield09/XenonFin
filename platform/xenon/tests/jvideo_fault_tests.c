@@ -30,7 +30,7 @@ static void inject(xf_http_client *c,int status,const char *type,const void *bod
 static unsigned audio_pending,audio_can_submit;
 static int queued_audio(void *p){(void)p;return (int)audio_pending;}
 static int free_audio(void *p){(void)p;return 65536-(int)audio_pending;}
-static void submit_audio(void *p,const unsigned char *bytes,size_t n){(void)p;(void)bytes;CHECK(audio_can_submit && n==2048);audio_pending+=(unsigned)n;}
+static int submit_audio(void *p,const unsigned char *bytes,size_t n){(void)p;(void)bytes;CHECK(audio_can_submit && n==2048);audio_pending+=(unsigned)n;return 1;}
 static void ready_audio(void){
     char json[1024],*at;xf_audio_backend audio={queued_audio,free_audio,submit_audio,NULL};
     xf_jvideo_audio(&movie,&audio);audio_pending=audio_can_submit=0;strcpy(json,negotiation);at=strstr(json,"}]}]}");CHECK(at);
@@ -56,7 +56,7 @@ static void diagnostic_export(void) {
 int main(void){
     start();inject(&movie.control,401,"application/json",NULL,0,1);xf_jvideo_tick(&movie,1,1);CHECK(movie.session_expired && movie.state==XF_JV_ERROR);clean();
     start();inject(&movie.control,200,"application/json","{}",2,1);xf_jvideo_tick(&movie,1,1);CHECK(movie.state==XF_JV_ERROR && !movie.stream.active);clean();
-    start();xf_jvideo_stop(&movie,1);xf_jvideo_tick(&movie,2,1);CHECK(movie.state==XF_JV_FINISHED && !movie.control.active);clean();
+    start();xf_jvideo_stop(&movie,1);xf_jvideo_tick(&movie,2,1);CHECK(movie.state==XF_JV_FINISHED && movie.av_state==XF_AV_STOPPED && !movie.control.active);clean();
     start();ready();inject(&movie.stream,403,"text/plain",NULL,0,1);xf_jvideo_tick(&movie,2,1);CHECK(movie.failed && strstr(movie.message,"403"));clean();
     start();ready();inject(&movie.stream,401,"text/plain",NULL,0,1);xf_jvideo_tick(&movie,2,1);CHECK(movie.session_expired && movie.failed);clean();
     start();ready();inject(&movie.stream,302,"text/plain",NULL,0,1);xf_jvideo_tick(&movie,2,1);CHECK(movie.failed && strstr(movie.message,"302"));clean();
@@ -91,8 +91,8 @@ int main(void){
     movie.audio.decoder.pcm_size=8192;xf_jvideo_service(&movie,2);
     CHECK(!audio_pending && movie.av_state==XF_AV_REBUFFERING);
     CHECK(movie.rebuffer_count==1 && movie.rebuffers[0].pcm==8192 && movie.rebuffers[0].video_queue==1 && strstr(movie.rebuffers[0].reason,"PCM low"));
-    movie.audio.decoder.pcm_size=16384;xf_jvideo_service(&movie,3);
-    CHECK(audio_pending==8192 && !movie.audio.rebuffering && movie.av_state==XF_AV_PLAYING);
+    movie.audio.decoder.pcm_size=XF_AV_RECOVER_PCM;xf_jvideo_service(&movie,3);
+    CHECK(audio_pending>=8192 && audio_pending<=XF_AV_DMA_BYTES && !movie.audio.rebuffering && movie.av_state==XF_AV_PLAYING);
     CHECK(!movie.rebuffer_open && movie.rebuffers[0].duration==1 && movie.rebuffer_count==1);
     xf_jvideo_stop(&movie,4);audio_pending=0;clean();
     /* An empty picture queue between decode calls is not input starvation.
@@ -101,9 +101,14 @@ int main(void){
     movie.audio.started=movie.audio.aligned=1;movie.audio.have_video_pts=movie.audio.have_audio_pts=1;
     movie.audio.submitted=48000;movie.audio.played=47488;audio_pending=2048;
     movie.audio.maps[0]=(xf_av_map){0,90000};movie.audio.map_count=1;
-    movie.audio.decoder.pcm_size=16384;player.state=XF_VIDEO_PLAYING;player.count=player.pending=0;
-    xf_jvideo_service(&movie,3);CHECK(audio_pending==8192 && !movie.audio.rebuffering);
+    movie.audio.decoder.pcm_size=XF_AV_RECOVER_PCM;player.state=XF_VIDEO_PLAYING;player.count=player.pending=0;
+    xf_jvideo_service(&movie,3);CHECK(audio_pending>=8192 && audio_pending<=XF_AV_DMA_BYTES && !movie.audio.rebuffering);
     xf_jvideo_stop(&movie,4);audio_pending=0;clean();
+    /* A healthy/blocked transport must not cause an infinite initial-preroll
+     * hold. This is a codec/preroll error, never a fabricated HTTP timeout. */
+    start();ready_audio();xf_http_cancel(&movie.stream);movie.stream.done=0;movie.stream.error[0]=0;
+    movie.stream.response.headers_done=1;movie.stream.response.status=200;movie.progress_at=0;
+    xf_jvideo_tick(&movie,20001,1);CHECK(movie.failed && !strcmp(movie.error_origin,"initial audio preroll"));clean();
     /* Mode setting survives stream reset and cannot change active ownership. */
     start();CHECK(!xf_jvideo_mode(&movie,XF_AV_VIDEO_ONLY));xf_jvideo_stop(&movie,1);xf_jvideo_tick(&movie,2,1);
     CHECK(xf_jvideo_mode(&movie,XF_AV_VIDEO_ONLY));xf_jvideo_forget(&movie);CHECK(movie.mode==XF_AV_VIDEO_ONLY);clean();

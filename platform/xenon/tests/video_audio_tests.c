@@ -6,7 +6,7 @@ static xf_av_audio audio;static unsigned checks,pending,submitted;static unsigne
 #define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"AV audio line %d: %s\n",__LINE__,#x);exit(1);}}while(0)
 static int queued(void *p){(void)p;return (int)pending;}
 static int available(void *p){(void)p;return 65536-(int)pending;}
-static void submit(void *p,const unsigned char *bytes,size_t n){(void)p;CHECK(n==2048 && pending+n<=XF_AV_DMA_BYTES);CHECK(submitted+n<=sizeof(capture));memcpy(capture+submitted,bytes,n);submitted+=(unsigned)n;pending+=(unsigned)n;}
+static int submit(void *p,const unsigned char *bytes,size_t n){(void)p;CHECK(n==2048 && pending+n<=XF_AV_DMA_BYTES);CHECK(submitted+n<=sizeof(capture));memcpy(capture+submitted,bytes,n);submitted+=(unsigned)n;pending+=(unsigned)n;return 1;}
 static void reset(int64_t offset){
     xf_audio_backend backend={queued,available,submit,NULL};xf_av_audio_init(&audio,&backend);audio.enabled=1;
     pending=submitted=0;memset(capture,0xaa,sizeof(capture));
@@ -26,7 +26,8 @@ int main(void){
     /* Genuine input starvation latches one underrun until sufficient preroll. */
     audio.decoder.pcm_size=0;xf_av_audio_output(&audio,1,1,0);CHECK(audio.underruns==1 && audio.rebuffering && !pending);
     xf_av_audio_output(&audio,1,1,0);CHECK(audio.underruns==1);
-    audio.decoder.pcm_size=16384;xf_av_audio_output(&audio,1,0,0);CHECK(!pending);
+    audio.decoder.pcm_size=XF_AV_RECOVER_PCM-4;xf_av_audio_output(&audio,1,1,0);CHECK(!pending && audio.underruns==1);
+    audio.decoder.pcm_size=XF_AV_RECOVER_PCM;xf_av_audio_output(&audio,1,0,0);CHECK(!pending);
     xf_av_audio_output(&audio,1,1,0);CHECK(pending==8192 && !audio.rebuffering);
     /* Positive offset inserts sample-exact silence, no descriptor padding gap. */
     reset(9000);
@@ -39,14 +40,14 @@ int main(void){
     reset(0);audio.decoder.pcm_size=0;audio.bridge=1;
     xf_av_audio_output(&audio,1,1,1);CHECK(pending==8192 && audio.bridge_frames==2048);
     pending=0;CHECK(xf_av_audio_clock(&audio,&position) && position==42666);
-    audio.maps[0].base_pts=45000+5625;audio.decoder.pcm_size=16384;
+    audio.maps[0].base_pts=45000+5625;audio.decoder.pcm_size=XF_AV_RECOVER_PCM;
     for(i=0;i<3;++i){xf_av_audio_output(&audio,1,1,0);pending=0;}
     CHECK(!audio.bridge && submitted>12000);
     for(i=0;i<12000;++i)CHECK(!capture[i]);
     for(;i<submitted;++i)CHECK(capture[i]==0x31);
     reset(-9000);for(i=0;i<8;++i)xf_av_audio_decode(&audio,0);
-    CHECK(!audio.trim_frames && audio.trimmed_frames==4800 && audio.initial_offset_us== -100000);
-    xf_av_audio_output(&audio,1,1,0);CHECK(pending==8192 && capture[0]==0x31);
+    CHECK(!audio.trim_frames && !audio.trimmed_frames && audio.clock_offset_us== -100000 && audio.initial_offset_us== -100000);
+    xf_av_audio_output(&audio,1,1,0);CHECK(pending==8192 && capture[0]==0x31);CHECK(!xf_av_audio_clock(&audio,&position) && !position);
     /* Timestamp marks inside a split frame apply to the next frame start. */
     reset(0);audio.have_audio_pts=0;audio.aligned=0;
     CHECK(xf_av_audio_stamp(&audio,1,100,45000)==1);
@@ -78,5 +79,12 @@ int main(void){
     for(i=0;i<500;++i)CHECK(xf_av_audio_clock(&audio,&position) && audio.played==audio.submitted);
     audio.rebuffering=1;CHECK(!xf_av_audio_clock(&audio,&position) && position==audio.submitted*1000000/48000);
     xf_av_audio_init(&audio,NULL);CHECK(!audio.played && !audio.submitted && !audio.started);
-    puts("Native movie audio DMA consumption clock, exact offset silence/trim, pause/rebuffer, PTS and codec rejection PASS");return 0;
+    /* A partially consumed stereo frame is not a fully consumed frame. */
+    reset(0);audio.decoder.finished=1;audio.decoder.pcm_size=0;audio.tail_limit_frames=1;
+    xf_av_audio_output(&audio,1,1,1);CHECK(submitted==2048);pending=0;xf_av_audio_output(&audio,1,1,1);CHECK(submitted==2048);
+    reset(0);xf_av_audio_output(&audio,1,1,0);pending=8191;CHECK(xf_av_audio_clock(&audio,&position) && !position);
+    /* A timestamp overlap is rejected, never repaired by dropping real PCM. */
+    reset(0);audio.maps[0].base_pts=audio.origin_pts-90;xf_av_audio_output(&audio,1,1,0);
+    CHECK(audio.failed && !audio.late_frames && !audio.trimmed_frames && !submitted && strstr(audio.error,"no samples discarded"));
+    puts("Native movie audio DMA consumption clock, timestamp-origin alignment without PCM trimming, pause/rebuffer, PTS and codec rejection PASS");return 0;
 }

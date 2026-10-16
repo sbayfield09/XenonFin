@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "posix_tcp.h"
+#include "../audio_native.h"
 #include "../jvideo.h"
 #include "../video_pixels.h"
 #include <stdlib.h>
@@ -14,6 +15,7 @@ static unsigned hw_bytes;static FILE *pcm_file;
 static int console_cost,force_recovery,recovery_injected;static uint64_t gpu_at;
 static int sync_test,pending_flash,last_flash,stall_test,allow_tail;
 static uint64_t sync_max_error;
+static unsigned short_stall;static long interruption_ns=250000000;
 static unsigned hw_rate=48000;static uint64_t pause_duration=700000,stall_at;
 static uint64_t beep_frames[16],flash_audio_us[16];static unsigned beeps,flashes;
 /* Host DMA model consumes real decoded PCM at its own sample clock. Only the
@@ -21,7 +23,7 @@ static uint64_t beep_frames[16],flash_audio_us[16];static unsigned beeps,flashes
 static void hw_tick(void);
 static int audio_queued(void *p){(void)p;hw_tick();return (int)hw_bytes;}
 static int audio_free(void *p){(void)p;hw_tick();return 65536-(int)hw_bytes;}
-static void audio_submit(void *p,const unsigned char *bytes,size_t n);
+static int audio_submit(void *p,const unsigned char *bytes,size_t n);
 
 static uint64_t wall(void) {struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return(uint64_t)t.tv_sec*1000000+t.tv_nsec/1000;}
 static uint64_t clock_us(void *p) {(void)p;return (wall()-base_us)*scale;}
@@ -33,7 +35,7 @@ static void hw_tick(void) {
     if(frames>hw_bytes/4)frames=hw_bytes/4;
     hw_bytes-=(unsigned)frames*4;hw_consumed+=frames;
 }
-static void audio_submit(void *p,const unsigned char *bytes,size_t n) {
+static int audio_submit(void *p,const unsigned char *bytes,size_t n) {
     size_t i;(void)p;hw_tick();CHECK(n==2048 && hw_bytes+n<=XF_AV_DMA_BYTES);
     for(i=0;i<n;i+=2){int sample=(int16_t)(bytes[i]|((unsigned)bytes[i+1]<<8));energy+=(uint64_t)((int64_t)sample*sample);}
     if(sync_test)for(i=0;i<n;i+=4) {
@@ -43,7 +45,12 @@ static void audio_submit(void *p,const unsigned char *bytes,size_t n) {
     }
     hw_bytes+=(unsigned)n;
     if(pcm_file)CHECK(fwrite(bytes,1,n,pcm_file)==n);
-}
+return 1;}
+void xenon_sound_init(void){}
+int xenon_sound_get_unplayed(void){return audio_queued(NULL);}
+int xenon_sound_get_free(void){return audio_free(NULL);}
+void xenon_sound_submit(void *bytes,int size){CHECK(audio_submit(NULL,bytes,(size_t)size));}
+uint32_t xf_test_audio_status(void){return (uint32_t)((hw_consumed*4/2048)&31);}
 static int begin(void *p,const xf_video_info *info,char *e,size_t n) {(void)p;(void)e;(void)n;CHECK(info->width<=720 && info->height<=480 && info->fps<=30);return 1;}
 static int submit(void *p,const xf_video_image *frame,char *e,size_t n) {
     xf_video_info info={frame->width,frame->height,30,1};xf_video_rect rect=xf_video_fit(&info,640,384);unsigned i;uint64_t hash=1469598103934665603ULL;
@@ -74,6 +81,7 @@ static uint32_t step(void) {
     uint32_t now=(uint32_t)((wall()-base_us)/1000);struct timespec delay={0,500000};
     uint64_t start=wall();
     if(stall_test && !stall_at && player.timeline_us>3000000)stall_at=wall();
+    xf_audio_native_service(clock_us(NULL));
     xf_jvideo_service(&movie,now);
     if(!stall_at || wall()-stall_at>5000000)xf_test_tcp_poll();
     movie.network_us+=wall()-start;
@@ -83,14 +91,14 @@ static uint32_t step(void) {
     if(force_recovery && !recovery_injected && player.timeline_us>3000000 && player.pending && player.ready && player.pending_pts>player.timeline_us) {
         /* Pause CPU service long enough for real model DMA to drain. No fake
          * sample advancement: hw_tick accounts only actual queued frames. */
-        struct timespec interruption={0,60000000};nanosleep(&interruption,NULL);hw_tick();
+        struct timespec interruption={0,interruption_ns};nanosleep(&interruption,NULL);hw_tick();
         recovery_injected=1;
     }
     nanosleep(&delay,NULL);return now;
 }
 int main(int argc,char **argv) {
     xf_endpoint ep;char error[180],path[300];const char *token=getenv("JELLYFIN_ACCESS_TOKEN"),*user=getenv("JELLYFIN_USER_ID");xf_item item;uint32_t now=0;uint64_t deadline;int paused=0,resumed=0,stop_early=0,held_pause=0;uint64_t pause_at=0,position=0;unsigned shown=0;
-    xf_audio_backend audio={audio_queued,audio_free,audio_submit,NULL};
+    xf_audio_backend audio;
     xf_video_backend backend={begin,submit,poll,end,clock_us,"host production CPU pixel converter",NULL,present,NULL,NULL};
     CHECK(argc>=3 && token && user && xf_endpoint_parse(argv[1],&ep,error,sizeof(error)));
     if(argc>3 && !strcmp(argv[3],"--accelerated"))scale=20;
@@ -101,8 +109,9 @@ int main(int argc,char **argv) {
     if(argc>3 && !strcmp(argv[3],"--slow-audio"))hw_rate=46000;
     if(argc>3 && !strcmp(argv[3],"--console-cost"))console_cost=1;
     if(argc>3 && !strcmp(argv[3],"--recovery")){console_cost=1;force_recovery=1;}
+    if(argc>3 && !strcmp(argv[3],"--short-stall")){console_cost=1;force_recovery=1;short_stall=1;interruption_ns=60000000;}
     if(argc>3 && (!strcmp(argv[3],"--audio-tail") || !strcmp(argv[3],"--audio-gap")))allow_tail=1;
-    memset(&item,0,sizeof(item));xf_video_init(&player,&xf_mpeg1_codec);xf_jvideo_init(&movie,&player);xf_jvideo_audio(&movie,&audio);xf_http_init(&api);xf_test_tcp_init(&ep);base_us=wall();
+    xf_audio_native_init(&audio);memset(&item,0,sizeof(item));xf_video_init(&player,&xf_mpeg1_codec);xf_jvideo_init(&movie,&player);xf_jvideo_audio(&movie,&audio);xf_http_init(&api);xf_test_tcp_init(&ep);base_us=wall();
     if(console_cost){static xf_video_codec codec;codec=costly_codec;codec.open=xf_mpeg1_codec.open;codec.close=xf_mpeg1_codec.close;player.codec=&codec;}
     if(argc>3 && !strcmp(argv[3],"--mode-a"))CHECK(xf_jvideo_mode(&movie,XF_AV_VIDEO_ONLY));
     if(argc>3 && !strcmp(argv[3],"--mode-b"))CHECK(xf_jvideo_mode(&movie,XF_AV_AUDIO_ONLY));
@@ -137,15 +146,16 @@ int main(int argc,char **argv) {
         if(!allow_tail)CHECK(!movie.audio.bridge_frames && !movie.audio.late_frames && !movie.audio.gap_events);
         if(player.state==XF_VIDEO_ENDED)CHECK(movie.audio.decoder.output_frames==movie.audio.pcm_frames+movie.audio.trimmed_frames);
     }
-    if(force_recovery)CHECK(recovery_injected && movie.audio.underruns);
+    if(force_recovery)CHECK(recovery_injected && (short_stall?!movie.audio.underruns:movie.audio.underruns>0));
     if(stall_test)CHECK(movie.audio.underruns+player.underruns>0 && movie.rebuffer_count && movie.rebuffers[(movie.rebuffer_count-1)%XF_AV_REBUFFERS].reason[0]);
     if(pcm_file)fclose(pcm_file);
     if(sync_test) {
         unsigned i;CHECK(beeps==8 && flashes==8);
-        for(i=0;i<beeps;++i){int64_t error=(int64_t)flash_audio_us[i]-(int64_t)(beep_frames[i]*1000000/48000);CHECK(error> -50000 && error<50000);if((uint64_t)llabs(error)>sync_max_error)sync_max_error=(uint64_t)llabs(error);}
+        for(i=0;i<beeps;++i){int64_t error=(int64_t)flash_audio_us[i]-((int64_t)(beep_frames[i]*1000000/48000)+movie.audio.clock_offset_us);CHECK(error> -50000 && error<50000);if((uint64_t)llabs(error)>sync_max_error)sync_max_error=(uint64_t)llabs(error);}
     }
     CHECK(!movie.audio.enabled || (movie.pts_count[0] && movie.pts_count[1]));
     fprintf(stderr,"MP3 frames=%u Hz=%u channels=%u actual-consumed=%llu max-AV-late-us=%llu initial-PTS-offset-us=%lld audio-underruns=%u PTS-error-us=%lld\n",movie.audio.decoder.mp3_frames,movie.audio.decoder.rate,movie.audio.decoder.channels,(unsigned long long)hw_consumed,(unsigned long long)max_av_late,(long long)movie.audio.initial_offset_us,movie.audio.underruns,(long long)movie.audio.timestamp_error_us);
     printf("{\"decoded\":%u,\"presented\":%u,\"dropped\":%u,\"underruns\":%u,\"received\":%llu,\"ps_peak\":%u,\"moving_rgb_frames\":%u,\"source_runtime_ticks\":%llu,\"position_us\":%llu,\"reports_204\":true,\"cleaned\":true,\"accelerated_host_clock\":%llu,\"backpressure\":%u,\"audio_frames\":%u,\"audio_hz\":%u,\"audio_channels\":%u,\"audio_consumed_frames\":%llu,\"audio_underruns\":%u,\"av_max_late_us\":%llu,\"audio_initial_offset_us\":%lld,\"audio_pts_error_us\":%lld,\"sync_flashes\":%u,\"sync_beeps\":%u,\"audio_expected\":%u,\"device_rate_test\":%u,\"bridge_frames\":%llu,\"late_audio_trim_frames\":%llu,\"gap_events\":%u,\"flash_beep_max_error_us\":%llu,\"mp3_max_us\":%llu,\"video_decode_max_us\":%llu,\"refill_max_us\":%llu,\"refill_gap_max_us\":%llu,\"rebuffer_events\":%u}\n",player.decoded,player.rendered,player.dropped,player.underruns,(unsigned long long)movie.ps.received,(unsigned)movie.ps.peak,changes,(unsigned long long)movie.source.runtime,(unsigned long long)player.timeline_us,(unsigned long long)scale,xf_test_tcp_backpressure(),movie.audio.decoder.mp3_frames,movie.audio.decoder.rate,movie.audio.decoder.channels,(unsigned long long)hw_consumed,movie.audio.underruns,(unsigned long long)max_av_late,(long long)movie.audio.initial_offset_us,(long long)movie.audio.timestamp_error_us,flashes,beeps,movie.audio.enabled,hw_rate,(unsigned long long)movie.audio.bridge_frames,(unsigned long long)movie.audio.late_frames,movie.audio.gap_events,(unsigned long long)sync_max_error,(unsigned long long)movie.audio_times.max,(unsigned long long)player.max_decode_us,(unsigned long long)movie.refill_times.max,(unsigned long long)movie.max_service_gap_us,movie.rebuffer_count);
+    {const xf_audio_native_metrics *d=xf_audio_native_status();CHECK(!d->failed&&!d->overruns&&!d->format_errors&&d->submitted==d->consumed);}
     xf_jvideo_forget(&movie);xf_video_stop(&player);xf_test_tcp_finish();return 0;
 }

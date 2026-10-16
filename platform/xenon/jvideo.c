@@ -22,10 +22,11 @@ static void finish(xf_jvideo *m,int failed,const char *message,uint32_t now) {
     m->terminal_http_complete=m->stream.response.complete;m->terminal_http_failed=m->stream.response.failed;
     snprintf(m->terminal_http_error,sizeof(m->terminal_http_error),"%s",m->stream.error);
     m->last_pcm=m->audio.decoder.pcm_size;m->last_dma=m->audio.queued;
+    {uint64_t position=0;if(m->audio.enabled)xf_av_audio_clock(&m->audio,&position);m->terminal_audio_us=position;}
     m->terminal_played=m->audio.played;m->terminal_submitted=m->audio.submitted;
     m->terminal_video_pts=m->player->last_present_pts;m->terminal_dma_register=m->dma_register;
     if(failed && !m->error_origin[0])snprintf(m->error_origin,sizeof(m->error_origin),"playback control");
-    m->failed|=failed;transition(m,failed?XF_AV_ERROR:XF_AV_ENDED,now);
+    m->failed|=failed;transition(m,failed?XF_AV_ERROR:m->stopped?XF_AV_STOPPED:XF_AV_ENDED,now);
     if(m->stream.active)xf_http_cancel(&m->stream);
     if(m->control_pending && (m->control_kind==JV_NEGOTIATE || m->control_kind==JV_PROGRESS)) {
         xf_http_cancel(&m->control);m->control_pending=0;xf_wipe(&m->control.response,sizeof(m->control.response));
@@ -37,7 +38,7 @@ static void finish(xf_jvideo *m,int failed,const char *message,uint32_t now) {
     m->state=XF_JV_STOPPING;
 }
 const char *xf_jvideo_state_name(unsigned state) {
-    static const char *names[]={"BUFFERING","PREROLL","PLAYING","REBUFFERING","PAUSED","ERROR","ENDED"};
+    static const char *names[]={"INITIAL_BUFFERING","INITIAL_BUFFERING","PLAYING","REBUFFERING","PAUSED","ERROR","ENDED","STOPPED"};
     return state<sizeof(names)/sizeof(*names)?names[state]:"UNKNOWN";
 }
 int xf_jvideo_mode(xf_jvideo *m,unsigned mode) {
@@ -84,7 +85,7 @@ static void rebuffer_event(xf_jvideo *m,uint32_t now) {
     r->http_age=now-m->stream.progress;r->received=m->ps.received;r->service_gap_us=m->last_service_gap_us;
     r->submit_age_us=m->last_submit_at?us-m->last_submit_at:0;
     if(m->service_at && us-m->service_at>r->service_gap_us)r->service_gap_us=us-m->service_at;
-    if(r->service_gap_us>=42667)reason="CPU service gap exceeded 42.7 ms DMA cover";
+    if(r->service_gap_us>=170667)reason="CPU service gap exceeded 170.7 ms DMA cover";
     else if(m->ps.payload<m->ps.payload_end && !m->ps.payload_kind && !xf_mpeg1_stream_space())reason="Demux blocked on full video ES";
     else if(m->ps.payload<m->ps.payload_end && m->ps.payload_kind && !xf_audio_space(&a->decoder))reason="Demux blocked on full audio ES";
     else if(!r->pcm && !r->audio_es && !r->ps)reason="Network/compressed input empty";
@@ -114,7 +115,7 @@ static void output(xf_jvideo *m,int ready,uint32_t now) {
 /* High-priority cooperative audio service: no HTTP, video decode or GPU waits.
  * Call on both sides of the non-preemptible video codec and before sleeping.
  * Decode only to the software low-water mark, four MP3 frames maximum per call.
- * The existing 8 KiB hardware queue and all ring capacities are unchanged. */
+ * A 32 KiB DMA window covers measured 103ms service stalls; all allocated rings retain their existing capacities. */
 void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
     xf_video *v=m->player;xf_av_audio *a=&m->audio;uint64_t before,position,started;unsigned i;
     int ready;
@@ -130,6 +131,13 @@ void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
     m->service_at=started;++m->service_calls;
     before=m->backend.microseconds(m->backend.context);xf_av_audio_clock(a,&position);
     xf_time_add(&m->clock_times,m->backend.microseconds(m->backend.context)-before);
+    /* Once the last picture is decoded, cap generated tail/bridge silence
+     * at the known video end (one final descriptor may be padded). Never
+     * truncate actual decoded PCM, including codec padding. */
+    if(v->eof && v->info.fps>0) {
+        int64_t end=(int64_t)(v->last_decoded_pts+(uint64_t)(1000000.0/v->info.fps+0.5))-a->clock_offset_us;
+        if(end>0)a->tail_limit_frames=((uint64_t)end*48000+999999)/1000000;
+    }
     /* Recovery needs ONE usable picture, not a completely full queue.
      * A held master clock explicitly permits decode-ahead in video.c. */
     ready=m->mode==XF_AV_AUDIO_ONLY || v->pending || v->count || v->state==XF_VIDEO_ENDED;
@@ -142,7 +150,7 @@ void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
     if(!m->pause_requested)output(m,ready,now);
     if(!m->pause_requested || a->queued)for(i=0;i<4 && !a->failed;++i) {
         unsigned frames=a->decoder.mp3_frames;
-        if(a->decoder.pcm_size>=32768 && !a->trim_frames)break;
+        if(a->decoder.pcm_size>=XF_AV_PCM_TARGET)break;
         before=m->backend.microseconds(m->backend.context);xf_av_audio_decode(a,m->decoder_end);
         if(a->decoder.mp3_frames==frames)break;
         xf_time_add(&m->audio_times,m->backend.microseconds(m->backend.context)-before);
@@ -174,14 +182,14 @@ void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
 }
 int xf_jvideo_export(const xf_jvideo *m,const char *path) {
     FILE *f=fopen(path,"w");unsigned k,i,n;if(!f)return 0;
-    fprintf(f,"# XenonFin 0.7.2 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
+    fprintf(f,"# XenonFin 0.7.4 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
     fprintf(f,"# HTTP status=%u code=%d done=%d complete=%d failed=%d active=%d rx=%llu PS=%llu backpressure=%d\n",
         m->stream_status,m->terminal_http_code,m->terminal_http_done,m->terminal_http_complete,m->terminal_http_failed,m->stream.active,
         (unsigned long long)m->stream.received_size,(unsigned long long)m->ps.received,m->stream.backpressure);
     fprintf(f,"# PES V=%llu A=%llu lastPTS V=%lld A=%lld PCM=%u DMA=%u submitted=%llu consumed=%llu drift_us=%lld max_refill_gap_us=%llu\n",
         (unsigned long long)m->ps.packets,(unsigned long long)m->ps.audio_packets,(long long)m->ps.last_video_pts,(long long)m->ps.last_audio_pts,
         (unsigned)m->last_pcm,(unsigned)m->last_dma,(unsigned long long)m->terminal_submitted,(unsigned long long)m->terminal_played,
-        (long long)m->terminal_video_pts-(long long)(m->terminal_played*1000000/48000),(unsigned long long)m->max_service_gap_us);
+        (long long)m->terminal_video_pts-(long long)m->terminal_audio_us,(unsigned long long)m->max_service_gap_us);
     fprintf(f,"# after_cleanup_consumed=%llu submitted=%llu\n",(unsigned long long)m->audio.played,(unsigned long long)m->audio.submitted);
     fprintf(f,"# last_read=%d receive_calls=%u remote_eof=%u HTTP_error=%s app_error=%s\n",m->stream.last_receive_result,m->stream.receive_calls,m->stream.eof_seen,m->terminal_http_error,m->message);
     fprintf(f,"# TCP wnd=%u announced=%u refused=%u blocked_bytes=%u flags=%x state=%u idle_ms=%u window_updates=%u\n",
@@ -189,6 +197,7 @@ int xf_jvideo_export(const xf_jvideo *m,const char *path) {
         m->stream.tcp_flags,m->stream.tcp_state,m->stream.idle_age,m->stream.window_updates);
     fprintf(f,"# DMA raw=%08x native=%u rptr=%u last_valid=%u remaining=%u wraps=%u\n",m->terminal_dma_register,m->dma_seen,m->terminal_dma_register&31,(m->terminal_dma_register>>8)&31,m->terminal_dma_register>>16,m->dma_wraps);
     fprintf(f,"# MP3 max_us=%llu DMA-submit max_us=%llu clock-read max_us=%llu\n",(unsigned long long)m->audio_times.max,(unsigned long long)m->dma_times.max,(unsigned long long)m->clock_times.max);
+    fprintf(f,"# audio_overruns=%u counter_faults=%u MP3_errors=%u bad_sync_bytes=%u\n",m->dma_overruns,m->dma_counter_faults,m->audio.decoder_errors,m->audio.decoder.bad_bytes);
     fprintf(f,"stage,value,last_progress_ms\n");
     for(i=0;i<XF_AV_STAGE_COUNT;++i)fprintf(f,"%u,%llu,%u\n",i,(unsigned long long)m->stages[i].value,m->stages[i].changed_at);
     fprintf(f,"kind,index,elementary_offset,pts_90k\n");
@@ -205,7 +214,7 @@ int xf_jvideo_export(const xf_jvideo *m,const char *path) {
     {int ok=!ferror(f);if(fclose(f))ok=0;return ok;}
 }
 void xf_jvideo_stop(xf_jvideo *m,uint32_t now) {
-    if(xf_jvideo_active(m) && m->state!=XF_JV_STOPPING)finish(m,0,"Video stopped; reporting and stopping server encoding.",now);
+    if(xf_jvideo_active(m) && m->state!=XF_JV_STOPPING){m->stopped=1;finish(m,0,"Video stopped; reporting and stopping server encoding.",now);}
 }
 void xf_jvideo_pause(xf_jvideo *m,uint32_t now) {
     if(!xf_jvideo_active(m) || m->state==XF_JV_STOPPING)return;
@@ -311,6 +320,10 @@ void xf_jvideo_tick(xf_jvideo *m,uint32_t now,int ready) {
             uint64_t progress=m->player->decoded+m->audio.decoder.mp3_frames+m->audio.played+m->ps.audio_bytes+m->ps.video_bytes;
             if(progress!=m->progress_value || m->pause_requested){m->progress_value=progress;m->progress_at=now;m->stalled_ms=0;}
             else m->stalled_ms=(uint32_t)(now-m->progress_at);
+            if(m->audio.enabled && !m->audio.started && !m->pause_requested && m->stalled_ms>=20000) {
+                snprintf(m->error_origin,sizeof(m->error_origin),"initial audio preroll");
+                finish(m,1,"No initial MP3/PTS/preroll progress for 20s; inspect server audio transcode.",now);
+            }
             /* A snapshot is diagnostic, not a fabricated network failure.
              * Protocol/decoder/DMA faults retain their own terminal errors. */
         }

@@ -15,10 +15,11 @@ int xf_music_active(const xf_music *m) { return m->state >= XF_MUSIC_NEGOTIATING
 uint64_t xf_music_position(const xf_music *m) { return m->played * 10000000 / 48000; }
 static unsigned queued(xf_music *m) {
     int n = m->audio.queued(m->audio.context);
-    return n > 0 && n <= 65536 ? (unsigned)n : 0;
+    if(n<0 || n>65536){m->decoder.failed=1;snprintf(m->decoder.error,sizeof(m->decoder.error),"Invalid audio DMA queue reading.");return 65536;}
+    return (unsigned)n;
 }
 static void clock_audio(xf_music *m) {
-    uint64_t pending = queued(m) / 4, played = m->submitted > pending ? m->submitted - pending : 0;
+    uint64_t pending = (queued(m)+3) / 4, played = m->submitted > pending ? m->submitted - pending : 0;
     if (played > m->valid_submitted) played = m->valid_submitted;
     if (played > m->played) m->played = played;
 }
@@ -139,7 +140,7 @@ static void output_audio(xf_music *m) {
         if (free_bytes < 0 || (unsigned)free_bytes < ((n + 2047) & ~2047U) + 2048) return;
         valid = xf_audio_pcm_take(&m->decoder, m->output, n);
         n = (valid + 2047) & ~2047U; memset(m->output + valid, 0, n - valid);
-        m->audio.submit(m->audio.context, m->output, n); m->submitted += n / 4; m->valid_submitted += valid / 4;
+        if(!m->audio.submit(m->audio.context,m->output,n)){m->failure=1;m->decoder.failed=1;snprintf(m->decoder.error,sizeof(m->decoder.error),"PCM output rejected submission.");return;} m->submitted += n / 4; m->valid_submitted += valid / 4;
         pending += (unsigned)n; m->started = 1;
     }
 }
@@ -165,6 +166,7 @@ void xf_music_tick(xf_music *m, uint32_t now, int ready) {
                     ++m->underruns; m->state = XF_MUSIC_BUFFERING; say(m, "Network/decode underrun; rebuffering.");
                 }
                 output_audio(m);
+                if(m->decoder.failed){failed(m,m->decoder.error,now);return;}
                 if (m->decoder.finished && !m->decoder.pcm_size && !queued(m)) {
                     if (m->queue_index + 1 < m->queue_total && (m->queue.view == XF_CHILDREN || m->queue.view == XF_TRACKS)) {
                         m->next_index = m->queue_index + 1; m->next = 1;

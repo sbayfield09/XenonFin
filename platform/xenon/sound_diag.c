@@ -84,7 +84,7 @@ void xf_sound_diag_tick_us(xf_sound_diag *d,uint64_t now) {
         if(!d->submitted){d->started_at=now;d->progress_at=now;}
         /* SDK copies synchronously into its own aligned 64KiB DMA ring before
          * returning. This scratch block is never directly owned by hardware. */
-        d->backend.submit(d->backend.context,d->block,sizeof(d->block));
+        if(!d->backend.submit(d->backend.context,d->block,sizeof(d->block))){error(d,"PCM submission rejected; no frames counted.");return;}
         d->frames+=frames;d->submitted+=sizeof(d->block);d->queued+=sizeof(d->block);
         if(d->frames==d->target_frames)d->state=XF_TONE_DRAINING;
     }

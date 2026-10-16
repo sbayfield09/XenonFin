@@ -1,6 +1,6 @@
 #ifndef XF_SOUND_DIAG_H
 #define XF_SOUND_DIAG_H
-#include "music.h"
+#include "audio_output.h"
 #define XF_SOUND_RATE 48000U
 #define XF_SOUND_FRAME_BYTES 4U
 #define XF_SOUND_BLOCK_BYTES 2048U

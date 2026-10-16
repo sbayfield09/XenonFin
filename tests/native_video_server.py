@@ -117,7 +117,7 @@ def main():
                 if args.extended:
                     for name, label in [('Video Only', 'silent source fallback'), ('Delayed Audio', 'positive audio PTS offset'), ('Short Audio', 'hardware-clocked silent video tail'), ('Gapped Audio', 'timestamp-gapped source PCM placement')]:
                         cases.append((next(i for i in indexed if i['Name'] == name), '--audio-gap' if name == 'Gapped Audio' else '--audio-tail' if name == 'Short Audio' else '', label))
-                    cases.extend([(movie, '--mode-a', 'mode A same audio-bearing stream/video only'), (movie, '--mode-b', 'mode B same stream/audio only'), (movie, '--console-cost', 'console-cost cooperative decode and GPU'), (movie, '--recovery', 'console-cost forced DMA recovery'), (movie, '--pause-long', '20-second pause/backpressure'), (movie, '--stall', '5-second network interruption/rebuffer'), (movie, '--slow-audio', '46 kHz simulated device vs 48 kHz media clock')])
+                    cases.extend([(movie, '--mode-a', 'mode A same audio-bearing stream/video only'), (movie, '--mode-b', 'mode B same stream/audio only'), (movie, '--console-cost', 'console-cost cooperative decode and GPU'), (movie, '--short-stall', '60ms CPU stall covered by bounded DMA'), (movie, '--recovery', '250ms CPU stall and DMA recovery'), (movie, '--pause-long', '20-second pause/backpressure'), (movie, '--stall', '5-second network interruption/rebuffer'), (movie, '--slow-audio', '46 kHz simulated device vs 48 kHz media clock')])
                 if args.long:
                     long_movie = next(i for i in indexed if i['Type'] == 'Movie' and i['Name'] == 'Long Stream')
                     cases.append((long_movie, '', f'long-duration {args.long_seconds}-second media/realtime HOST clock'))

@@ -8,7 +8,7 @@
 #include "browse.h"
 enum xf_jvideo_state { XF_JV_IDLE, XF_JV_NEGOTIATING, XF_JV_STREAMING, XF_JV_STOPPING, XF_JV_FINISHED, XF_JV_ERROR };
 enum xf_av_mode { XF_AV_BOTH, XF_AV_VIDEO_ONLY, XF_AV_AUDIO_ONLY };
-enum xf_av_state { XF_AV_BUFFERING, XF_AV_PREROLL, XF_AV_PLAYING, XF_AV_REBUFFERING, XF_AV_PAUSED, XF_AV_ERROR, XF_AV_ENDED };
+enum xf_av_state { XF_AV_INITIAL_BUFFERING, XF_AV_BUFFERING=XF_AV_INITIAL_BUFFERING, XF_AV_PREROLL, XF_AV_PLAYING, XF_AV_REBUFFERING, XF_AV_PAUSED, XF_AV_ERROR, XF_AV_ENDED, XF_AV_STOPPED };
 enum { XF_AV_HTTP_RX, XF_AV_DEMUX, XF_AV_AUDIO_ES, XF_AV_MP3, XF_AV_PCM, XF_AV_DMA_SUBMIT, XF_AV_DMA_CONSUME, XF_AV_VIDEO_DECODE, XF_AV_VIDEO_SCHEDULE, XF_AV_GPU_PRESENT, XF_AV_STAGE_COUNT };
 typedef struct { uint64_t value; uint32_t changed_at; } xf_av_stage;
 typedef struct { uint32_t at; unsigned state; } xf_av_transition;
@@ -28,7 +28,7 @@ typedef struct {
     char token[2049],user[65],device[65],item[65],title[181];
     char message[180],report_message[128];
     enum xf_jvideo_state state;
-    unsigned pause_requested,report_due,mode;
+    unsigned pause_requested,report_due,mode,stopped;
     enum xf_av_state av_state;
     xf_av_transition transitions[32]; unsigned transition_count;
     xf_av_stage stages[XF_AV_STAGE_COUNT];
@@ -38,10 +38,10 @@ typedef struct {
     xf_av_pts first_pts[2][30]; unsigned pts_count[2];
     char wait_reason[96],error_origin[24];
     unsigned service_calls,submit_calls;
-    unsigned dma_register,dma_seen,dma_wraps;
+    unsigned dma_register,dma_seen,dma_wraps,dma_overruns,dma_counter_faults;
     int terminal_http_code,terminal_http_done,terminal_http_complete,terminal_http_failed;
     char terminal_http_error[128];
-    uint64_t terminal_played,terminal_submitted,terminal_video_pts;
+    uint64_t terminal_played,terminal_submitted,terminal_video_pts,terminal_audio_us;
     unsigned terminal_dma_register;
     uint32_t stalled_ms;
     size_t last_pcm,last_dma;

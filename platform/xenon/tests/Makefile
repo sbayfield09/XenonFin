@@ -9,7 +9,7 @@ endif
 COMMON := ../protocol.c ../json.c ../http.c ../browse.c
 COMMON_HEADERS := ../protocol.h ../browse.h
 MUSIC := ../audio_decode.c ../music_api.c
-MUSIC_HEADERS := ../audio_decode.h ../music_api.h ../third_party/minimp3/minimp3.h
+MUSIC_HEADERS := ../audio_output.h ../audio_native.h ../audio_decode.h ../music_api.h ../third_party/minimp3/minimp3.h
 .PHONY: all test
 all: $(OUT)/video-source-tests $(OUT)/video-native-tests $(OUT)/video-tests $(OUT)/video-probe $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-probe $(OUT)/music-protocol-tests $(OUT)/decode-probe $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests $(OUT)/probe
 $(OUT):
@@ -18,8 +18,8 @@ $(OUT)/music-protocol-tests: music_protocol_tests.c $(COMMON) $(MUSIC) ../text.c
 	$(HOST_CC) $(CFLAGS) music_protocol_tests.c $(COMMON) $(MUSIC) ../text.c -o $@
 $(OUT)/decode-probe: decode_probe.c ../audio_decode.c ../protocol.c ../json.c $(MUSIC_HEADERS) ../protocol.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) decode_probe.c ../audio_decode.c ../protocol.c ../json.c -o $@
-$(OUT)/music-probe: music_probe.c posix_tcp.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) $(COMMON_HEADERS) $(MUSIC_HEADERS) ../music.h ../native_net.h | $(OUT)
-	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include music_probe.c posix_tcp.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) -o $@
+$(OUT)/music-probe: music_probe.c posix_tcp.c ../audio_native.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) $(COMMON_HEADERS) $(MUSIC_HEADERS) ../music.h ../native_net.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -DXF_AUDIO_NATIVE_TEST -I$(DEVKITXENON)/usr/include music_probe.c posix_tcp.c ../audio_native.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) -o $@
 $(OUT)/music-fault-tests: music_fault_tests.c tcp_fake.h ../music.c ../tcp_client.c $(COMMON) $(MUSIC) $(COMMON_HEADERS) $(MUSIC_HEADERS) ../music.h ../native_net.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include music_fault_tests.c ../music.c ../tcp_client.c $(COMMON) $(MUSIC) -o $@
 $(OUT)/browse-tests: browse_tests.c $(COMMON) $(COMMON_HEADERS) ../browse.h | $(OUT)
@@ -37,6 +37,13 @@ $(OUT)/network-tests: network_tests.c ../native_net.c $(COMMON) ../native_net.h 
 $(OUT)/init-tests: init_tests.c ../init_guard.c ../driver_guard.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include init_tests.c ../init_guard.c -o $@
 test: $(OUT)/video-source-tests $(OUT)/video-native-tests $(OUT)/video-tests $(OUT)/console-adapter-tests $(OUT)/render-tests $(OUT)/framebuffer-tests $(OUT)/music-fault-tests $(OUT)/music-protocol-tests $(OUT)/browse-tests $(OUT)/protocol-tests $(OUT)/tcp-tests $(OUT)/guard-tests $(OUT)/network-tests $(OUT)/init-tests
+	$(OUT)/audio-native-tests
+	$(OUT)/audio-native-tests format
+	$(OUT)/audio-native-tests counter
+	$(OUT)/audio-native-tests overrun
+	$(OUT)/audio-native-tests stall
+	$(OUT)/audio-native-tests pause
+	$(OUT)/audio-native-tests partial
 	$(OUT)/sound-diag-tests
 	$(OUT)/video-audio-tests
 	$(OUT)/jvideo-fault-tests
@@ -83,15 +90,15 @@ $(OUT)/stream-decode-probe: stream_decode_probe.c ../video_ps.c ../video_ps.h ..
 
 JVIDEO := ../video_audio.c ../audio_decode.c ../jvideo.c ../video_api.c ../video_ps.c ../video.c ../video_sync.c ../video_decode.c ../video_pixels.c ../music_api.c ../tcp_client.c $(COMMON)
 all: $(OUT)/jvideo-probe
-$(OUT)/jvideo-probe: jvideo_probe.c posix_tcp.c $(JVIDEO) ../video_audio.h ../audio_decode.h ../music.h ../jvideo.h ../video_api.h ../video_ps.h ../video.h ../video_decode.h ../native_net.h ../protocol.h | $(OUT)
-	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include jvideo_probe.c posix_tcp.c $(JVIDEO) -lm -o $@
+$(OUT)/jvideo-probe: jvideo_probe.c posix_tcp.c ../audio_native.c $(JVIDEO) ../video_audio.h ../audio_output.h ../audio_native.h ../audio_decode.h ../music.h ../jvideo.h ../video_api.h ../video_ps.h ../video.h ../video_decode.h ../native_net.h ../protocol.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -DXF_AUDIO_NATIVE_TEST -I$(DEVKITXENON)/usr/include jvideo_probe.c posix_tcp.c ../audio_native.c $(JVIDEO) -lm -o $@
 
 all test: $(OUT)/video-stream-tests
 $(OUT)/video-stream-tests: video_stream_tests.c ../video_api.c ../video_ps.c ../music_api.c $(COMMON) ../video_api.h ../video_ps.h $(COMMON_HEADERS) | $(OUT)
 	$(HOST_CC) $(CFLAGS) video_stream_tests.c ../video_api.c ../video_ps.c ../music_api.c $(COMMON) -o $@
 
 all test: $(OUT)/jvideo-fault-tests
-$(OUT)/jvideo-fault-tests: jvideo_fault_tests.c tcp_fake.h $(JVIDEO) ../video_audio.h ../audio_decode.h ../music.h ../jvideo.h ../video_api.h ../video_ps.h ../video.h ../video_decode.h ../native_net.h ../protocol.h | $(OUT)
+$(OUT)/jvideo-fault-tests: jvideo_fault_tests.c tcp_fake.h $(JVIDEO) ../video_audio.h ../audio_output.h ../audio_native.h ../audio_decode.h ../music.h ../jvideo.h ../video_api.h ../video_ps.h ../video.h ../video_decode.h ../native_net.h ../protocol.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include jvideo_fault_tests.c $(JVIDEO) -lm -o $@
 
 all test: $(OUT)/video-audio-tests
@@ -99,5 +106,13 @@ $(OUT)/video-audio-tests: video_audio_tests.c ../video_audio.c ../audio_decode.c
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include video_audio_tests.c ../video_audio.c ../audio_decode.c ../protocol.c ../json.c -o $@
 
 all test: $(OUT)/sound-diag-tests
-$(OUT)/sound-diag-tests: sound_diag_tests.c ../sound_diag.c ../sound_diag.h ../sound_sine_table.h ../music.h | $(OUT)
+$(OUT)/sound-diag-tests: sound_diag_tests.c ../sound_diag.c ../sound_diag.h ../sound_sine_table.h ../audio_output.h | $(OUT)
 	$(HOST_CC) $(CFLAGS) -I$(DEVKITXENON)/usr/include sound_diag_tests.c ../sound_diag.c -lm -o $@
+
+all test: $(OUT)/audio-native-tests
+$(OUT)/audio-native-tests: audio_native_tests.c ../audio_native.c ../audio_native.h ../audio_output.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) -DXF_AUDIO_NATIVE_TEST -I$(DEVKITXENON)/usr/include audio_native_tests.c ../audio_native.c -o $@
+
+all: $(OUT)/audio-ps-probe
+$(OUT)/audio-ps-probe: audio_ps_probe.c ../video_ps.c ../audio_decode.c ../protocol.c ../json.c ../video_ps.h ../audio_decode.h | $(OUT)
+	$(HOST_CC) $(CFLAGS) audio_ps_probe.c ../video_ps.c ../audio_decode.c ../protocol.c ../json.c -o $@

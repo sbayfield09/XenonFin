@@ -1,5 +1,7 @@
 # XenonFin 0.7.3 — restore the working PCM output backend
 
+The user subsequently confirmed correct sound from the standalone test. The integrated follow-up is [0.7.4](NATIVE_AV_074.md); this page retains the original rollback procedure and historical acceptance status.
+
 **First acceptance gate: a clean, correctly pitched 440 Hz sine on a real Xbox 360. This is still pending.** The user reports 0.7.2 video works, but movie audio and even its standalone tone are glitched/low-pitched. Earlier releases produced recognisable MP3/music and movie sound. Investigation of MPEG-PS and A/V timestamps is suspended.
 
 ## Regression comparison and rollback
