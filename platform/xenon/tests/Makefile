@@ -44,6 +44,11 @@ test: $(OUT)/video-source-tests $(OUT)/video-native-tests $(OUT)/video-tests $(O
 	$(OUT)/audio-native-tests stall
 	$(OUT)/audio-native-tests pause
 	$(OUT)/audio-native-tests partial
+	$(OUT)/audio-native-tests startup
+	$(OUT)/audio-native-tests startup-timeout
+	$(OUT)/audio-native-tests pointer
+	$(OUT)/audio-native-tests alignment
+	$(OUT)/audio-native-tests layout
 	$(OUT)/sound-diag-tests
 	$(OUT)/video-audio-tests
 	$(OUT)/jvideo-fault-tests

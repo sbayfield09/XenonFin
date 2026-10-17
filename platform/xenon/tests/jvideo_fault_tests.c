@@ -15,9 +15,13 @@ static int poll(void *p,char *e,size_t n){(void)p;(void)e;(void)n;return 1;}
 static int present(void *p,char *e,size_t n){(void)p;(void)e;(void)n;CHECK(0);return 0;}
 static void end(void *p){(void)p;}
 static uint64_t clock_us(void *p){(void)p;return micro;}
+static int queued_audio(void *);
+static int free_audio(void *);
+static int submit_audio(void *,const unsigned char *,size_t);
 static void start(void){
+    xf_audio_backend audio={queued_audio,free_audio,submit_audio,NULL,NULL,NULL};
     xf_endpoint ep;xf_item item;char error[128];xf_video_backend backend={begin,submit,poll,end,clock_us,"fault-test",NULL,present,NULL,NULL};
-    xf_video_init(&player,&xf_mpeg1_codec);xf_jvideo_init(&movie,&player);memset(&item,0,sizeof(item));strcpy(item.id,"movie");strcpy(item.type,"Movie");strcpy(item.name,"Fault test");
+    xf_video_init(&player,&xf_mpeg1_codec);xf_jvideo_init(&movie,&player);xf_jvideo_audio(&movie,&audio);memset(&item,0,sizeof(item));strcpy(item.id,"movie");strcpy(item.type,"Movie");strcpy(item.name,"Fault test");
     CHECK(xf_endpoint_parse("127.0.0.1:8096",&ep,error,sizeof(error)));CHECK(xf_jvideo_play(&movie,&ep,"device","fault-token","user",&item,&backend,0));
 }
 static void inject(xf_http_client *c,int status,const char *type,const void *body,size_t size,int complete){
@@ -32,7 +36,7 @@ static int queued_audio(void *p){(void)p;return (int)audio_pending;}
 static int free_audio(void *p){(void)p;return 65536-(int)audio_pending;}
 static int submit_audio(void *p,const unsigned char *bytes,size_t n){(void)p;(void)bytes;CHECK(audio_can_submit && n==2048);audio_pending+=(unsigned)n;return 1;}
 static void ready_audio(void){
-    char json[1024],*at;xf_audio_backend audio={queued_audio,free_audio,submit_audio,NULL};
+    char json[1024],*at;xf_audio_backend audio={queued_audio,free_audio,submit_audio,NULL,NULL,NULL};
     xf_jvideo_audio(&movie,&audio);audio_pending=audio_can_submit=0;strcpy(json,negotiation);at=strstr(json,"}]}]}");CHECK(at);
     snprintf(at,sizeof(json)-(size_t)(at-json),"},%s]}]}","{\"Type\":\"Audio\",\"Codec\":\"aac\",\"Index\":1}");
     inject(&movie.control,200,"application/json",json,strlen(json),1);xf_jvideo_tick(&movie,1,1);

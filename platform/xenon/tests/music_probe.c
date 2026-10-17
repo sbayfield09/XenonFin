@@ -26,7 +26,14 @@ void xenon_sound_init(void){}
 int xenon_sound_get_unplayed(void){return queued(NULL);}
 int xenon_sound_get_free(void){return available(NULL);}
 void xenon_sound_submit(void *bytes,int size){CHECK(submit(NULL,bytes,(size_t)size));}
-uint32_t xf_test_audio_status(void){return (uint32_t)(((audio_total*4-hw_bytes)/2048)&31);}
+unsigned xf_test_audio_register(unsigned offset){
+    uint64_t total=audio_total*4;unsigned last=(unsigned)((total/2048-1)&31);
+    if(offset==0)return 0xa0000;
+    if(offset==8)return 0x1d08001c;
+    if(!total)return 0x8000;
+    return !hw_bytes?0x8000|(last<<8)|last:0x8000|((2048-(unsigned)((total-hw_bytes)%2048))<<16)|(last<<8)|(unsigned)(((total-hw_bytes)/2048)&31);
+}
+uint32_t xf_test_audio_descriptor(unsigned base,unsigned i){return __builtin_bswap32(i&1?0x80000800U:base+256+i/2*2048);}
 static uint32_t step(void){
     struct timespec delay={0,2000000};uint32_t now=(uint32_t)(wall_ms()-wall_start),elapsed=now-last_tick;
     unsigned drained=elapsed>1000?192000:elapsed*192;
@@ -58,7 +65,7 @@ int main(int argc,char **argv){
     xf_audio_backend backend;char error[128],ids[3][65];unsigned i;uint64_t position,pause_position;
     token=getenv("JELLYFIN_ACCESS_TOKEN");user=getenv("JELLYFIN_USER_ID");
     CHECK(argc==2&&token&&user&&xf_endpoint_parse(argv[1],&endpoint,error,sizeof(error)));
-    xf_audio_native_init(&backend);xf_music_init(&music,&backend);xf_http_init(&api);xf_browser_init(&browser);xf_test_tcp_init(&endpoint);wall_start=wall_ms();
+    xf_audio_native_init(&backend);xf_audio_native_bind(&backend,XF_AUDIO_MUSIC);xf_music_init(&music,&backend);xf_http_init(&api);xf_browser_init(&browser);xf_test_tcp_init(&endpoint);wall_start=wall_ms();
     request(XF_ROOT);for(i=0;i<browser.page.count;++i)if(!strcmp(browser.page.items[i].collection,"music"))break;
     CHECK(i<browser.page.count);browser.current.selected=i;request(XF_OPEN);CHECK(browser.page.count&& !strcmp(browser.page.items[0].type,"MusicArtist"));
     request(XF_OPEN);CHECK(browser.page.count&&!strcmp(browser.page.items[0].type,"MusicAlbum"));request(XF_OPEN);CHECK(browser.page.count==3);
@@ -86,6 +93,6 @@ int main(int argc,char **argv){
     }
     CHECK(xf_test_tcp_backpressure()>0);CHECK(energy>100000000&&audio_total>48000*6);
     printf("{\"native_mp3_playback\":true,\"mono_44100\":true,\"stereo_48000\":true,\"flac_to_mp3\":true,\"pause_resume\":true,\"skip_previous\":true,\"natural_end_and_advance\":true,\"reports_204\":true,\"pcm_frames_submitted\":%llu,\"pcm_energy\":%llu,\"backpressure_retries\":%u,\"submissions\":%u}\n",(unsigned long long)audio_total,(unsigned long long)energy,xf_test_tcp_backpressure(),submissions);
-    {const xf_audio_native_metrics *d=xf_audio_native_status();CHECK(!d->failed&&!d->overruns&&!d->format_errors&&d->submitted==d->consumed);}
+    {const xf_audio_native_metrics *d=xf_audio_native_status();CHECK(!d->failed&&!d->overruns&&!d->format_errors&&!d->owner&&!d->ownership_conflicts&&!d->shutdown_errors&&d->submitted==d->consumed);}
     xf_music_forget(&music);CHECK(!music.token[0]&&!music.track.id[0]&&!music.decoder.pcm_size);xf_test_tcp_finish();return 0;
 }

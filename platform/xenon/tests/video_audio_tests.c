@@ -8,7 +8,7 @@ static int queued(void *p){(void)p;return (int)pending;}
 static int available(void *p){(void)p;return 65536-(int)pending;}
 static int submit(void *p,const unsigned char *bytes,size_t n){(void)p;CHECK(n==2048 && pending+n<=XF_AV_DMA_BYTES);CHECK(submitted+n<=sizeof(capture));memcpy(capture+submitted,bytes,n);submitted+=(unsigned)n;pending+=(unsigned)n;return 1;}
 static void reset(int64_t offset){
-    xf_audio_backend backend={queued,available,submit,NULL};xf_av_audio_init(&audio,&backend);audio.enabled=1;
+    xf_audio_backend backend={queued,available,submit,NULL,NULL,NULL};xf_av_audio_init(&audio,&backend);audio.enabled=1;
     pending=submitted=0;memset(capture,0xaa,sizeof(capture));
     audio.have_video_pts=audio.have_audio_pts=1;audio.video_pts=45000;audio.audio_pts=45000+offset;
     memset(audio.decoder.pcm,0x31,sizeof(audio.decoder.pcm));audio.decoder.pcm_size=sizeof(audio.decoder.pcm);audio.decoder.pcm_write=0;

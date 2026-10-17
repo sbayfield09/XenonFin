@@ -13,7 +13,7 @@ static int queued(void *p){(void)p;return(int)hardware;}
 static int available(void *p){(void)p;return 65536-(int)hardware;}
 static int submit(void *p,const unsigned char *bytes,size_t n){(void)p;(void)bytes;(void)n;CHECK(0);return 1;}
 static void start(void){
-    xf_audio_backend backend={queued,available,submit,NULL};xf_endpoint ep;xf_item track;xf_location location;char error[128];
+    xf_audio_backend backend={queued,available,submit,NULL,NULL,NULL};xf_endpoint ep;xf_item track;xf_location location;char error[128];
     xf_music_init(&music,&backend);memset(&track,0,sizeof(track));memset(&location,0,sizeof(location));
     strcpy(track.id,id);strcpy(track.name,"Actual decoder fault test");strcpy(track.type,"Audio");location.view=XF_CHILDREN;strcpy(location.id,id);
     CHECK(xf_endpoint_parse("127.0.0.1:8096",&ep,error,sizeof(error)));

@@ -50,7 +50,15 @@ void xenon_sound_init(void){}
 int xenon_sound_get_unplayed(void){return audio_queued(NULL);}
 int xenon_sound_get_free(void){return audio_free(NULL);}
 void xenon_sound_submit(void *bytes,int size){CHECK(audio_submit(NULL,bytes,(size_t)size));}
-uint32_t xf_test_audio_status(void){return (uint32_t)((hw_consumed*4/2048)&31);}
+unsigned xf_test_audio_register(unsigned offset){
+    uint64_t total;unsigned last;
+    if(offset==0)return 0xa0000;
+    if(offset==8)return 0x1d08001c;
+    hw_tick();total=hw_consumed*4+hw_bytes;last=(unsigned)((total/2048-1)&31);
+    if(!total)return 0x8000;
+    return !hw_bytes?0x8000|(last<<8)|last:0x8000|((2048-(unsigned)((hw_consumed*4)%2048))<<16)|(last<<8)|(unsigned)((hw_consumed*4/2048)&31);
+}
+uint32_t xf_test_audio_descriptor(unsigned base,unsigned i){return __builtin_bswap32(i&1?0x80000800U:base+256+i/2*2048);}
 static int begin(void *p,const xf_video_info *info,char *e,size_t n) {(void)p;(void)e;(void)n;CHECK(info->width<=720 && info->height<=480 && info->fps<=30);return 1;}
 static int submit(void *p,const xf_video_image *frame,char *e,size_t n) {
     xf_video_info info={frame->width,frame->height,30,1};xf_video_rect rect=xf_video_fit(&info,640,384);unsigned i;uint64_t hash=1469598103934665603ULL;
@@ -111,7 +119,7 @@ int main(int argc,char **argv) {
     if(argc>3 && !strcmp(argv[3],"--recovery")){console_cost=1;force_recovery=1;}
     if(argc>3 && !strcmp(argv[3],"--short-stall")){console_cost=1;force_recovery=1;short_stall=1;interruption_ns=60000000;}
     if(argc>3 && (!strcmp(argv[3],"--audio-tail") || !strcmp(argv[3],"--audio-gap")))allow_tail=1;
-    xf_audio_native_init(&audio);memset(&item,0,sizeof(item));xf_video_init(&player,&xf_mpeg1_codec);xf_jvideo_init(&movie,&player);xf_jvideo_audio(&movie,&audio);xf_http_init(&api);xf_test_tcp_init(&ep);base_us=wall();
+    xf_audio_native_init(&audio);xf_audio_native_bind(&audio,XF_AUDIO_MOVIE);memset(&item,0,sizeof(item));xf_video_init(&player,&xf_mpeg1_codec);xf_jvideo_init(&movie,&player);xf_jvideo_audio(&movie,&audio);xf_http_init(&api);xf_test_tcp_init(&ep);base_us=wall();
     if(console_cost){static xf_video_codec codec;codec=costly_codec;codec.open=xf_mpeg1_codec.open;codec.close=xf_mpeg1_codec.close;player.codec=&codec;}
     if(argc>3 && !strcmp(argv[3],"--mode-a"))CHECK(xf_jvideo_mode(&movie,XF_AV_VIDEO_ONLY));
     if(argc>3 && !strcmp(argv[3],"--mode-b"))CHECK(xf_jvideo_mode(&movie,XF_AV_AUDIO_ONLY));
@@ -156,6 +164,6 @@ int main(int argc,char **argv) {
     CHECK(!movie.audio.enabled || (movie.pts_count[0] && movie.pts_count[1]));
     fprintf(stderr,"MP3 frames=%u Hz=%u channels=%u actual-consumed=%llu max-AV-late-us=%llu initial-PTS-offset-us=%lld audio-underruns=%u PTS-error-us=%lld\n",movie.audio.decoder.mp3_frames,movie.audio.decoder.rate,movie.audio.decoder.channels,(unsigned long long)hw_consumed,(unsigned long long)max_av_late,(long long)movie.audio.initial_offset_us,movie.audio.underruns,(long long)movie.audio.timestamp_error_us);
     printf("{\"decoded\":%u,\"presented\":%u,\"dropped\":%u,\"underruns\":%u,\"received\":%llu,\"ps_peak\":%u,\"moving_rgb_frames\":%u,\"source_runtime_ticks\":%llu,\"position_us\":%llu,\"reports_204\":true,\"cleaned\":true,\"accelerated_host_clock\":%llu,\"backpressure\":%u,\"audio_frames\":%u,\"audio_hz\":%u,\"audio_channels\":%u,\"audio_consumed_frames\":%llu,\"audio_underruns\":%u,\"av_max_late_us\":%llu,\"audio_initial_offset_us\":%lld,\"audio_pts_error_us\":%lld,\"sync_flashes\":%u,\"sync_beeps\":%u,\"audio_expected\":%u,\"device_rate_test\":%u,\"bridge_frames\":%llu,\"late_audio_trim_frames\":%llu,\"gap_events\":%u,\"flash_beep_max_error_us\":%llu,\"mp3_max_us\":%llu,\"video_decode_max_us\":%llu,\"refill_max_us\":%llu,\"refill_gap_max_us\":%llu,\"rebuffer_events\":%u}\n",player.decoded,player.rendered,player.dropped,player.underruns,(unsigned long long)movie.ps.received,(unsigned)movie.ps.peak,changes,(unsigned long long)movie.source.runtime,(unsigned long long)player.timeline_us,(unsigned long long)scale,xf_test_tcp_backpressure(),movie.audio.decoder.mp3_frames,movie.audio.decoder.rate,movie.audio.decoder.channels,(unsigned long long)hw_consumed,movie.audio.underruns,(unsigned long long)max_av_late,(long long)movie.audio.initial_offset_us,(long long)movie.audio.timestamp_error_us,flashes,beeps,movie.audio.enabled,hw_rate,(unsigned long long)movie.audio.bridge_frames,(unsigned long long)movie.audio.late_frames,movie.audio.gap_events,(unsigned long long)sync_max_error,(unsigned long long)movie.audio_times.max,(unsigned long long)player.max_decode_us,(unsigned long long)movie.refill_times.max,(unsigned long long)movie.max_service_gap_us,movie.rebuffer_count);
-    {const xf_audio_native_metrics *d=xf_audio_native_status();CHECK(!d->failed&&!d->overruns&&!d->format_errors&&d->submitted==d->consumed);}
+    {const xf_audio_native_metrics *d=xf_audio_native_status();CHECK(!d->failed&&!d->overruns&&!d->format_errors&&!d->owner&&!d->ownership_conflicts&&!d->shutdown_errors&&d->submitted==d->consumed);}
     xf_jvideo_forget(&movie);xf_video_stop(&player);xf_test_tcp_finish();return 0;
 }

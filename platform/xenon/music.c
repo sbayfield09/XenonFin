@@ -8,8 +8,9 @@ void xf_music_init(xf_music *m, const xf_audio_backend *backend) {
     xf_http_init(&m->stream); xf_http_init(&m->control); xf_audio_decoder_init(&m->decoder);
 }
 void xf_music_forget(xf_music *m) {
-    xf_audio_backend audio = m->audio;
-    xf_http_cancel(&m->stream); xf_http_cancel(&m->control); xf_wipe(m, sizeof(*m)); xf_music_init(m, &audio);
+    xf_audio_backend audio = m->audio;unsigned lease=m->lease;
+    if(lease && audio.queued(audio.context)==0 && xf_audio_release(&audio))lease=0;
+    xf_http_cancel(&m->stream); xf_http_cancel(&m->control); xf_wipe(m, sizeof(*m)); xf_music_init(m, &audio);m->lease=lease;
 }
 int xf_music_active(const xf_music *m) { return m->state >= XF_MUSIC_NEGOTIATING && m->state <= XF_MUSIC_DRAINING; }
 uint64_t xf_music_position(const xf_music *m) { return m->played * 10000000 / 48000; }
@@ -61,7 +62,8 @@ int xf_music_play(xf_music *m, const xf_endpoint *ep, const char *device, const 
         m->next_track = *track; m->next_queue = *location; m->next_index = index; m->next_total = total;
         m->next = 2; drain(m, now); say(m, "Switching track; finishing previous session."); return 1;
     }
-    m->endpoint = *ep; snprintf(m->device, sizeof(m->device), "%s", device);
+    if(m->lease || !xf_audio_acquire(&m->audio)){say(m,"Audio device is starting, faulty or owned; inspect Audio diagnostics.");return 0;}
+    m->lease=1;m->endpoint = *ep; snprintf(m->device, sizeof(m->device), "%s", device);
     snprintf(m->token, sizeof(m->token), "%s", token); snprintf(m->user, sizeof(m->user), "%s", user);
     m->track = *track; m->queue = *location; m->queue_index = index; m->queue_total = total;
     begin(m, now); return 1;
@@ -145,6 +147,7 @@ static void output_audio(xf_music *m) {
     }
 }
 void xf_music_tick(xf_music *m, uint32_t now, int ready) {
+    if(!xf_music_active(m)){if(m->lease && m->audio.queued(m->audio.context)==0 && xf_audio_release(&m->audio))m->lease=0;return;}
     xf_http_tick(&m->control, now, ready); xf_http_tick(&m->stream, now, ready); clock_audio(m);
     if (m->control_pending && m->control.done && !m->control.active) handle_control(m, now);
     if (m->session_expired) return;
@@ -194,7 +197,10 @@ void xf_music_tick(xf_music *m, uint32_t now, int ready) {
                     m->queue.view == XF_TRACKS ? m->queue.scope : m->queue.id, m->next_index,
                     m->queue.view == XF_TRACKS ? "SortName" : "IndexNumber,SortName", m->queue.view == XF_TRACKS ? "&Recursive=true&IncludeItemTypes=Audio" : "");
                 control(m, LOOKUP, "GET", path, NULL, now); m->state = XF_MUSIC_NEGOTIATING;
-            } else m->state = m->failure ? XF_MUSIC_ERROR : XF_MUSIC_FINISHED;
+            } else {
+                if(m->lease && xf_audio_release(&m->audio))m->lease=0;
+                m->state = m->failure ? XF_MUSIC_ERROR : XF_MUSIC_FINISHED;
+            }
         } else if (m->started && m->state != XF_MUSIC_DRAINING && xf_music_active(m) && (m->report_due || (uint32_t)(now - m->report_at) >= 5000)) report(m, PROGRESS, now);
     }
     /* Bad hardware queue readings must not make stop/skip wait forever. */

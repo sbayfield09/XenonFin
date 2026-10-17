@@ -17,6 +17,7 @@
 #include "timing.h"
 #define printf xf_console_printf
 static xf_sound_diag test;
+static unsigned snapshot_page;
 static uint64_t clock_us(void) {
     uint32_t high,low,check;
     do {
@@ -32,8 +33,21 @@ static void draw(uint64_t now) {
     extern int xenos_is_hdmi;
     elapsed=test.submitted?((test.finished_at?test.finished_at:now)-test.started_at):0;
     console_set_colors(0xff101624,0xffe6eaf4);xf_console_begin();
-    printf("\n  XENONFIN 0.7.4 - ISOLATED PCM TEST\n\n");
+    printf("\n  XENONFIN 0.7.5 - ISOLATED PCM TEST\n\n");
     printf("  Unmodified pinned libXenon sound.o | %s\n",xenos_is_hdmi?"HDMI":"analogue");
+    {const xf_audio_native_metrics *a=xf_audio_native_status();
+     printf("  %s owner %s | LB/RB snapshots %u/3\n",xf_audio_native_state_name(a->state),xf_audio_native_owner_name(a->owner),snapshot_page+1);
+     if(snapshot_page) {
+        static const char *names[]={"before init","after init","before PCM","playing","stopped","first fault"};unsigned i;
+        for(i=(snapshot_page-1)*3;i<snapshot_page*3;++i){const xf_audio_dma_snapshot *r=&a->snapshots[i];
+            printf("  %s valid %u base %08x control %08x\n",names[i],r->valid,r->base,r->control);
+            printf("  status %08x read %u last %u remain %u queue %u\n",r->status,r->status&31,r->status>>8&31,r->status>>16,r->queued);}
+        printf("  Init %u duplicate %u active %u conflicts %u shutdown %u\n",a->init_calls,a->double_init,a->active_init,a->ownership_conflicts,a->shutdown_errors);
+        printf("  First startup wait %08x queue %u observations %u\n",a->startup_sample.status,a->startup_sample.queued,a->startup_observations);
+        printf("  %s\n",a->error);xf_console_end();return;
+     }
+     if(a->error[0])printf("  %.100s\n",a->error);
+    }
     printf("  No network, codecs, video player or A/V clock.\n\n");
     printf("  Left/Right: select test   Up/Down: 1 or 60 seconds\n");
     printf("  A: run   X: stop/drain   B: XeLL after drain\n\n");
@@ -66,6 +80,7 @@ int main(void) {
         xf_audio_native_service(now);
         xf_sound_diag_tick_us(&test,now);
         usb_do_poll();memset(&pad,0,sizeof(pad));get_controller_data(&pad,0);
+        if((pad.lb && !previous.lb)||(pad.rb && !previous.rb)){snapshot_page=(snapshot_page+(pad.rb?1:2))%3;dirty=1;}
         if(!xf_sound_diag_active(&test)) {
             if(pad.right && !previous.right)mode=(mode+1)%XF_SOUND_CASES;
             if(pad.left && !previous.left)mode=(mode+XF_SOUND_CASES-1)%XF_SOUND_CASES;
@@ -76,7 +91,7 @@ int main(void) {
         if(pad.x && !previous.x){xf_sound_diag_stop(&test);dirty=1;}
         if(pad.b && !previous.b) {
             if(xf_sound_diag_active(&test))xf_sound_diag_stop(&test);
-            else if(!xenon_sound_get_unplayed()){xf_console_shutdown();return 0;}
+            else if(!xf_audio_native_pending()){xf_console_shutdown();return 0;}
             else snprintf(test.message,sizeof(test.message),"DMA still owns audio. Wait for drain; cold boot if stuck.");
             dirty=1;
         }

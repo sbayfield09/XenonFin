@@ -7,6 +7,7 @@
 #include "audio_output.h"
 enum xf_music_state { XF_MUSIC_IDLE, XF_MUSIC_NEGOTIATING, XF_MUSIC_BUFFERING, XF_MUSIC_PLAYING, XF_MUSIC_DRAINING, XF_MUSIC_FINISHED, XF_MUSIC_ERROR };
 typedef struct {
+    unsigned lease;
     xf_http_client stream, control;
     xf_audio_decoder decoder;
     xf_audio_backend audio;

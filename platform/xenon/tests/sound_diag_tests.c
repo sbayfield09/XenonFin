@@ -59,7 +59,7 @@ static void run(const xf_audio_backend *b,unsigned mode,unsigned seconds,unsigne
     }
 }
 int main(int argc,char **argv) {
-    xf_audio_backend b={queued,available,submit,NULL};unsigned mode,i,ch;
+    xf_audio_backend b={queued,available,submit,NULL,NULL,NULL};unsigned mode,i,ch;
     reset(&b);CHECK(!xf_sound_diag_start(&d,1,0)&&!submitted_frames);
     pending=4096;CHECK(!xf_sound_diag_start(&d,0,0)&&!submitted_frames);pending=0;
     CHECK(!xf_sound_diag_select(&d,7,1)&&!xf_sound_diag_select(&d,0,2));

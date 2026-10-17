@@ -1,5 +1,10 @@
 # Xbox 360 acceptance checklist
 
+## Native 0.7.5 DMA startup and ownership
+
+The integrated 0.7.4 app failed before any media decode; standalone sound is confirmed working. 0.7.5 adds validated startup, explicit tone/music/movie leases and retained register snapshots using the original SDK driver. [Diagnosis, software evidence and cold-boot test](NATIVE_AUDIO_075.md). **The reported `00008000` status itself is empty; the earlier failing sample was not retained, so the console trigger still needs confirmation. Physical 0.7.5 tone/media output is unverified.** Older results below are historical.
+
+
 ## Native 0.7.4 complete audio integration
 
 The user confirms correct sound from the 0.7.3 standalone test. Version 0.7.4 unifies standalone/tone/music/movie output through the original SDK driver and a shared checked adapter; it adds consumed-audio timestamp-origin alignment without PCM trimming, bounded recovery hysteresis and DMA/decoder diagnostics. The video/transport/demux implementations remain unchanged. [Integration and final hardware test](NATIVE_AV_074.md). **Physical 0.7.4 music/movie continuity and synchronisation remain unverified.** Earlier results below are historical.

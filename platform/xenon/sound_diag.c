@@ -36,11 +36,14 @@ int xf_sound_diag_prepare(xf_sound_diag *d) {
 }
 int xf_sound_diag_start(xf_sound_diag *d,int busy,uint32_t now) {
     xf_audio_backend backend=d->backend;unsigned mode=d->mode,seconds=d->seconds;
-    if(busy || xf_sound_diag_active(d)){snprintf(d->message,sizeof(d->message),"Audio owned by playback/tone. Stop it and wait for cleanup first.");return 0;}
-    if(d->backend.queued(d->backend.context)) {error(d,"DMA is not empty (or invalid). No test submitted; stop playback or cold boot.");return 0;}
+    if(busy || d->lease || xf_sound_diag_active(d)){snprintf(d->message,sizeof(d->message),"Audio owned by playback/tone. Stop it and wait for cleanup first.");return 0;}
+    {int pending=d->backend.queued(d->backend.context);
+     if(pending<0){error(d,"Audio is not READY. Inspect startup/fault snapshots; no PCM submitted.");return 0;}
+     if(pending){error(d,"PCM remains queued. Stop playback and wait for drain before the tone.");return 0;}}
     xf_sound_diag_init(d,&backend);d->mode=mode;d->seconds=seconds;
     if((seconds!=1 && seconds!=60) || !xf_sound_diag_prepare(d)) {error(d,"PCM preflight failed; nothing submitted to DMA.");return 0;}
-    d->target_frames=seconds*XF_SOUND_RATE;d->progress_at=(uint64_t)now*1000;d->state=XF_TONE_PLAYING;
+    if(!xf_audio_acquire(&d->backend)){error(d,"Audio device is starting, faulty or owned by another player.");return 0;}
+    d->lease=1;d->target_frames=seconds*XF_SOUND_RATE;d->progress_at=(uint64_t)now*1000;d->state=XF_TONE_PLAYING;
     snprintf(d->message,sizeof(d->message),"PCM bytes verified; confirm actual clean pitch/channel output.");return 1;
 }
 void xf_sound_diag_stop(xf_sound_diag *d) {
@@ -50,7 +53,7 @@ void xf_sound_diag_stop(xf_sound_diag *d) {
 }
 void xf_sound_diag_tick_us(xf_sound_diag *d,uint64_t now) {
     unsigned budget,previous=d->queued,played;int q;
-    if(!xf_sound_diag_active(d))return;
+    if(!xf_sound_diag_active(d)){if(d->lease && d->backend.queued(d->backend.context)==0 && xf_audio_release(&d->backend))d->lease=0;return;}
     if(d->last_tick && now-d->last_tick>d->max_service_gap_us)d->max_service_gap_us=now-d->last_tick;
     d->last_tick=now;q=d->backend.queued(d->backend.context);
     if(q<0 || q>65536 || (unsigned)q>d->submitted){error(d,"Invalid DMA queue reading; no further PCM submitted.");return;}
@@ -67,7 +70,8 @@ void xf_sound_diag_tick_us(xf_sound_diag *d,uint64_t now) {
         d->rate_at=now;d->rate_begin=d->played;
     }
     if(d->state==XF_TONE_DRAINING && !d->queued) {
-        d->finished_at=now;d->state=XF_TONE_DONE;
+        if(d->lease && !xf_audio_release(&d->backend)){error(d,"Audio owner release failed after drain.");return;}
+        d->lease=0;d->finished_at=now;d->state=XF_TONE_DONE;
         snprintf(d->message,sizeof(d->message),"DMA drained. Hardware pitch/quality is UNCONFIRMED until heard.");return;
     }
     if(d->submitted && now-d->progress_at>=2000000){error(d,"DMA made no progress for 2s; no reset/rewrite. Cold boot if stuck.");return;}

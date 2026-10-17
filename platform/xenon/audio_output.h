@@ -13,5 +13,10 @@ typedef struct {
      * storage. Failure consumes no hardware space; never count a failed write. */
     int (*submit)(void *, const unsigned char *, size_t);
     void *context;
+    int (*acquire)(void *), (*release)(void *);
 } xf_audio_backend;
+/* Optional for software test backends; native callers hold a lease through
+ * pause, rebuffer and stop/drain. No acquisition resets the hardware. */
+static inline int xf_audio_acquire(const xf_audio_backend *b) {return !b->acquire || b->acquire(b->context);}
+static inline int xf_audio_release(const xf_audio_backend *b) {return !b->release || b->release(b->context);}
 #endif

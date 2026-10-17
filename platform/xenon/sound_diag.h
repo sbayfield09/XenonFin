@@ -9,7 +9,7 @@
 enum { XF_TONE_IDLE, XF_TONE_PLAYING, XF_TONE_DRAINING, XF_TONE_DONE, XF_TONE_ERROR };
 typedef struct {
     xf_audio_backend backend;
-    unsigned state,mode,seconds,frames,target_frames,submitted,queued,played;
+    unsigned state,mode,seconds,frames,target_frames,submitted,queued,played,lease;
     unsigned underruns,counter_faults,verified,pcm_hash,cancelled;
     uint64_t progress_at,started_at,finished_at,last_tick,max_service_gap_us;
     uint64_t rate_at,rate_us;unsigned rate_begin,rate_frames;

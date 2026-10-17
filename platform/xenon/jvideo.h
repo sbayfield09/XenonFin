@@ -28,7 +28,7 @@ typedef struct {
     char token[2049],user[65],device[65],item[65],title[181];
     char message[180],report_message[128];
     enum xf_jvideo_state state;
-    unsigned pause_requested,report_due,mode,stopped;
+    unsigned pause_requested,report_due,mode,stopped,lease;
     enum xf_av_state av_state;
     xf_av_transition transitions[32]; unsigned transition_count;
     xf_av_stage stages[XF_AV_STAGE_COUNT];

@@ -8,9 +8,11 @@ void xf_jvideo_init(xf_jvideo *m,xf_video *v) {memset(m,0,sizeof(*m));m->player=
 void xf_jvideo_audio(xf_jvideo *m,const xf_audio_backend *audio) {xf_av_audio_init(&m->audio,audio);}
 int xf_jvideo_active(const xf_jvideo *m) {return m->state>=XF_JV_NEGOTIATING && m->state<=XF_JV_STOPPING;}
 void xf_jvideo_forget(xf_jvideo *m) {
-    unsigned mode=m->mode;xf_audio_backend audio=m->audio.backend;xf_video *v=m->player;int owned=xf_jvideo_active(m);
+    unsigned mode=m->mode,lease=m->lease;xf_audio_backend audio=m->audio.backend;
+    if(lease && audio.queued(audio.context)==0 && xf_audio_release(&audio))lease=0;
+    xf_video *v=m->player;int owned=xf_jvideo_active(m);
     xf_http_cancel(&m->stream);xf_http_cancel(&m->control);if(owned)xf_video_stop(v);
-    xf_wipe(m,sizeof(*m));xf_jvideo_init(m,v);xf_jvideo_audio(m,&audio);m->mode=mode;
+    xf_wipe(m,sizeof(*m));xf_jvideo_init(m,v);xf_jvideo_audio(m,&audio);m->mode=mode;m->lease=lease;
 }
 static void control(xf_jvideo *m,unsigned kind,const char *method,const char *path,const char *body,uint32_t now) {
     xf_http_api(&m->control,&m->endpoint,m->device,m->token,method,path,body,now);m->control_kind=kind;m->control_pending=1;
@@ -182,7 +184,7 @@ void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
 }
 int xf_jvideo_export(const xf_jvideo *m,const char *path) {
     FILE *f=fopen(path,"w");unsigned k,i,n;if(!f)return 0;
-    fprintf(f,"# XenonFin 0.7.4 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
+    fprintf(f,"# XenonFin 0.7.5 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
     fprintf(f,"# HTTP status=%u code=%d done=%d complete=%d failed=%d active=%d rx=%llu PS=%llu backpressure=%d\n",
         m->stream_status,m->terminal_http_code,m->terminal_http_done,m->terminal_http_complete,m->terminal_http_failed,m->stream.active,
         (unsigned long long)m->stream.received_size,(unsigned long long)m->ps.received,m->stream.backpressure);
@@ -229,6 +231,8 @@ int xf_jvideo_play(xf_jvideo *m,const xf_endpoint *ep,const char *device,const c
     snprintf(m->device,sizeof(m->device),"%s",device);snprintf(m->token,sizeof(m->token),"%s",token);
     snprintf(m->user,sizeof(m->user),"%s",user);snprintf(m->item,sizeof(m->item),"%s",item->id);snprintf(m->title,sizeof(m->title),"%.180s",item->name);
     if(!xf_video_profile(body,sizeof(body),user))return 0;
+    if(m->lease || (m->mode!=XF_AV_VIDEO_ONLY && (!m->audio.backend.queued || !xf_audio_acquire(&m->audio.backend)))){snprintf(m->message,sizeof(m->message),"Audio device is starting, faulty or owned; inspect Audio diagnostics.");return 0;}
+    m->lease=m->mode!=XF_AV_VIDEO_ONLY;
     snprintf(path,sizeof(path),"/Items/%s/PlaybackInfo",item->id);control(m,JV_NEGOTIATE,"POST",path,body,now);
     {unsigned i;for(i=0;i<XF_AV_STAGE_COUNT;++i)m->stages[i].changed_at=now;}
     transition(m,XF_AV_BUFFERING,now);m->state=XF_JV_NEGOTIATING;m->rate_at=m->progress_at=now;snprintf(m->message,sizeof(m->message),"Negotiating MPEG-1 / MPEG-PS transcoding with MP3 audio.");return 1;
@@ -284,7 +288,7 @@ static void handle(xf_jvideo *m,uint32_t now) {
 }
 void xf_jvideo_tick(xf_jvideo *m,uint32_t now,int ready) {
     uint64_t before,cost;
-    if(!xf_jvideo_active(m))return;
+    if(!xf_jvideo_active(m)){if(m->lease && m->audio.backend.queued(m->audio.backend.context)==0 && xf_audio_release(&m->audio.backend))m->lease=0;return;}
     if(m->audio.enabled) {uint64_t position;xf_av_audio_clock(&m->audio,&position);}
     before=m->backend.microseconds(m->backend.context);
     xf_http_tick(&m->control,now,ready);xf_http_tick(&m->stream,now,ready);
@@ -348,6 +352,7 @@ void xf_jvideo_tick(xf_jvideo *m,uint32_t now,int ready) {
                 char path[240];m->cleaned=1;snprintf(path,sizeof(path),"/Videos/ActiveEncodings?DeviceId=%s&PlaySessionId=%s",m->device,m->source.session_id);
                 control(m,JV_CLEANUP,"DELETE",path,NULL,now);return;
             }
+            if(m->lease && m->audio.backend.queued(m->audio.backend.context)==0 && xf_audio_release(&m->audio.backend))m->lease=0;
             m->state=m->failed?XF_JV_ERROR:XF_JV_FINISHED;xf_wipe(m->token,sizeof(m->token));
         } else if(m->sent_start && (m->report_due || (uint32_t)(now-m->report_at)>=5000))report(m,JV_PROGRESS,now);
     }
