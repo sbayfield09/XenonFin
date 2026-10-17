@@ -17,8 +17,10 @@ void xf_jvideo_forget(xf_jvideo *m) {
 static void control(xf_jvideo *m,unsigned kind,const char *method,const char *path,const char *body,uint32_t now) {
     xf_http_api(&m->control,&m->endpoint,m->device,m->token,method,path,body,now);m->control_kind=kind;m->control_pending=1;
 }
-static void finish(xf_jvideo *m,int failed,const char *message,uint32_t now) {
-    if(m->state!=XF_JV_STOPPING)m->drain_at=now;
+static void finish_at(xf_jvideo *m,int failed,const char *message,uint32_t now,const char *caller,unsigned line) {
+    if(m->state==XF_JV_STOPPING)return;
+    m->drain_at=now;m->drain_line=line;m->drain_from=m->state;m->drain_av_from=m->av_state;m->drain_failed=failed;
+    snprintf(m->drain_caller,sizeof(m->drain_caller),"%s",caller);
     if(message)snprintf(m->message,sizeof(m->message),"%s",message);
     m->terminal_http_code=m->stream.error_code;m->terminal_http_done=m->stream.done;
     m->terminal_http_complete=m->stream.response.complete;m->terminal_http_failed=m->stream.response.failed;
@@ -28,6 +30,10 @@ static void finish(xf_jvideo *m,int failed,const char *message,uint32_t now) {
     m->terminal_played=m->audio.played;m->terminal_submitted=m->audio.submitted;
     m->terminal_video_pts=m->player->last_present_pts;m->terminal_dma_register=m->dma_register;
     if(failed && !m->error_origin[0])snprintf(m->error_origin,sizeof(m->error_origin),"playback control");
+    snprintf(m->drain_message,sizeof(m->drain_message),"%s",m->message);
+    snprintf(m->drain_origin,sizeof(m->drain_origin),"%s",m->error_origin);
+    m->drain_first_queue=m->drain_last_queue=m->audio.queue_reading;
+    m->drain_submitted=m->audio.submitted;m->drain_played=m->audio.played;
     m->failed|=failed;transition(m,failed?XF_AV_ERROR:m->stopped?XF_AV_STOPPED:XF_AV_ENDED,now);
     if(m->stream.active)xf_http_cancel(&m->stream);
     if(m->control_pending && (m->control_kind==JV_NEGOTIATE || m->control_kind==JV_PROGRESS)) {
@@ -39,6 +45,7 @@ static void finish(xf_jvideo *m,int failed,const char *message,uint32_t now) {
     m->pause_requested=0;
     m->state=XF_JV_STOPPING;
 }
+#define finish(m,failed,message,now) finish_at(m,failed,message,now,__func__,__LINE__)
 const char *xf_jvideo_state_name(unsigned state) {
     static const char *names[]={"INITIAL_BUFFERING","INITIAL_BUFFERING","PLAYING","REBUFFERING","PAUSED","ERROR","ENDED","STOPPED"};
     return state<sizeof(names)/sizeof(*names)?names[state]:"UNKNOWN";
@@ -184,7 +191,7 @@ void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
 }
 int xf_jvideo_export(const xf_jvideo *m,const char *path) {
     FILE *f=fopen(path,"w");unsigned k,i,n;if(!f)return 0;
-    fprintf(f,"# XenonFin 0.7.5 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
+    fprintf(f,"# XenonFin 0.7.6 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
     fprintf(f,"# HTTP status=%u code=%d done=%d complete=%d failed=%d active=%d rx=%llu PS=%llu backpressure=%d\n",
         m->stream_status,m->terminal_http_code,m->terminal_http_done,m->terminal_http_complete,m->terminal_http_failed,m->stream.active,
         (unsigned long long)m->stream.received_size,(unsigned long long)m->ps.received,m->stream.backpressure);
@@ -193,6 +200,10 @@ int xf_jvideo_export(const xf_jvideo *m,const char *path) {
         (unsigned)m->last_pcm,(unsigned)m->last_dma,(unsigned long long)m->terminal_submitted,(unsigned long long)m->terminal_played,
         (long long)m->terminal_video_pts-(long long)m->terminal_audio_us,(unsigned long long)m->max_service_gap_us);
     fprintf(f,"# after_cleanup_consumed=%llu submitted=%llu\n",(unsigned long long)m->audio.played,(unsigned long long)m->audio.submitted);
+    fprintf(f,"# drain caller=%s:%u from=%u av_from=%s at_ms=%u failed=%u origin=%s first=%s\n",
+        m->drain_caller,m->drain_line,m->drain_from,xf_jvideo_state_name(m->drain_av_from),m->drain_at,m->drain_failed,m->drain_origin,m->drain_message);
+    fprintf(f,"# drain queue_first=%d queue_last=%d cached=%u valid=%d submitted_at_entry=%llu played_at_entry=%llu timeout=%u secondary=%s\n",
+        m->drain_first_queue,m->drain_last_queue,m->audio.queued,m->audio.queue_valid,(unsigned long long)m->drain_submitted,(unsigned long long)m->drain_played,m->drain_timed_out,m->drain_error);
     fprintf(f,"# last_read=%d receive_calls=%u remote_eof=%u HTTP_error=%s app_error=%s\n",m->stream.last_receive_result,m->stream.receive_calls,m->stream.eof_seen,m->terminal_http_error,m->message);
     fprintf(f,"# TCP wnd=%u announced=%u refused=%u blocked_bytes=%u flags=%x state=%u idle_ms=%u window_updates=%u\n",
         m->stream.receive_window,m->stream.announced_window,m->stream.refused_bytes,m->stream.blocked_bytes,
@@ -343,9 +354,17 @@ void xf_jvideo_tick(xf_jvideo *m,uint32_t now,int ready) {
     if(!m->control_pending && !m->control.active) {
         if(m->attached && (m->player->rendered || (m->mode==XF_AV_AUDIO_ONLY && m->audio.started)) && m->source.session_id[0] && !m->sent_start)report(m,JV_START,now);
         else if(m->state==XF_JV_STOPPING) {
-            if(m->audio.enabled && m->audio.queued) {
+            m->drain_last_queue=m->audio.queue_reading;
+            if(m->audio.enabled && (!m->audio.queue_valid || m->audio.queued)) {
                 if((uint32_t)(now-m->drain_at)<2000)return;
-                m->failed=1;transition(m,XF_AV_ERROR,now);snprintf(m->error_origin,sizeof(m->error_origin),"DMA stop drain");snprintf(m->message,sizeof(m->message),"Audio DMA did not drain within 2s; reboot before playback.");
+                m->drain_timed_out=1;
+                snprintf(m->drain_error,sizeof(m->drain_error),"%s",m->audio.queue_valid?
+                    "Audio DMA remained nonempty for 2s; ownership retained.":
+                    "Audio DMA drain unverified for 2s: invalid queue reading; ownership retained.");
+                /* A failed read is not a measured occupied queue. Preserve the
+                 * error that entered STOPPING instead of masking it here. */
+                if(!m->failed){snprintf(m->error_origin,sizeof(m->error_origin),"DMA stop drain");snprintf(m->message,sizeof(m->message),"%s",m->drain_error);}
+                m->failed=1;transition(m,XF_AV_ERROR,now);
             }
             if(m->sent_start && !m->sent_stop) {report(m,JV_STOP,now);return;}
             if(m->source.session_id[0] && !m->cleaned) {

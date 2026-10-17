@@ -17,6 +17,9 @@ typedef struct {
     unsigned descriptor_base,buffer_base,startup_observations;
     int initialized,failed;
     xf_audio_dma_snapshot snapshots[XF_DMA_SNAPSHOTS],current,startup_sample;
+    /* Observation only: never authorises submission or clears a latched fault. */
+    xf_audio_dma_snapshot after_fault;
+    unsigned post_fault_reads;
     char error[160];
 } xf_audio_native_metrics;
 void xf_audio_native_init(xf_audio_backend *); /* boots once; binds tone client */

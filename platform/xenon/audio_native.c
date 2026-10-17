@@ -14,7 +14,7 @@ extern uint32_t xf_test_audio_descriptor(unsigned,unsigned);
 #endif
 static xf_audio_native_metrics device;
 static unsigned clients[]={XF_AUDIO_NONE,XF_AUDIO_TONE,XF_AUDIO_MUSIC,XF_AUDIO_MOVIE};
-static uint64_t now_us,start_at,progress_at,observed_consumed,session_start;
+static uint64_t now_us,start_at,progress_at,observed_consumed,session_start,post_fault_at;
 static int watching,start_watching;
 static unsigned pending(unsigned status) {
     return (((status>>8&31)-(status&31))&31)*XF_AUDIO_BLOCK_BYTES+(status>>16);
@@ -131,7 +131,19 @@ void xf_audio_native_init(xf_audio_backend *b) {
     xf_audio_native_bind(b,XF_AUDIO_TONE);
 }
 void xf_audio_native_service(uint64_t now) {
-    int n;now_us=now;n=queue(NULL);
+    int n;now_us=now;
+    if(device.failed) {
+        /* Keep the first fault/current snapshot frozen. Read MMIO at 10 Hz
+         * solely to distinguish physical drain from a software fault latch.
+         * No reset, queue acceptance, owner release or PCM writes occur here. */
+        if(!device.post_fault_reads || now-post_fault_at>=100000) {
+            unsigned saved=device.raw_status;
+            capture(&device.after_fault);device.raw_status=saved;
+            ++device.post_fault_reads;post_fault_at=now;
+        }
+        return;
+    }
+    n=queue(NULL);
     if(device.state==XF_AUDIO_STARTING) {
         if(!start_watching){start_at=now;start_watching=1;}
         if(now-start_at>=2000000){++device.counter_faults;failure("SDK DMA reset did not reach empty pointer zero in 2s; see startup/fault snapshots.");}
@@ -149,11 +161,12 @@ const xf_audio_native_metrics *xf_audio_native_status(void){return &device;}
 const char *xf_audio_native_state_name(unsigned s){static const char *n[]={"COLD","STARTING","READY","FAULT"};return s<4?n[s]:"INVALID";}
 const char *xf_audio_native_owner_name(unsigned s){static const char *n[]={"none","tone","music","movie"};return s<4?n[s]:"invalid";}
 int xf_audio_native_export(const char *path) {
-    static const char *names[]={"before-init","after-init","before-PCM","playing","stopped","fault","startup-wait"};
+    static const char *names[]={"before-init","after-init","before-PCM","playing","stopped","fault","startup-wait","after-fault-read-only"};
     FILE *f=fopen(path,"w");unsigned i;if(!f)return 0;
-    fprintf(f,"# XenonFin 0.7.5 audio state=%s owner=%s init=%u duplicate=%u active_init=%u conflicts=%u shutdown_errors=%u error=%s\n",xf_audio_native_state_name(device.state),xf_audio_native_owner_name(device.owner),device.init_calls,device.double_init,device.active_init,device.ownership_conflicts,device.shutdown_errors,device.error);
+    fprintf(f,"# XenonFin 0.7.6 audio state=%s owner=%s init=%u duplicate=%u active_init=%u conflicts=%u shutdown_errors=%u error=%s\n",xf_audio_native_state_name(device.state),xf_audio_native_owner_name(device.owner),device.init_calls,device.double_init,device.active_init,device.ownership_conflicts,device.shutdown_errors,device.error);
     fprintf(f,"stage,valid,at_us,base,control,status,read,last,remaining,decoded_queue,sdk_queue,sdk_free,submitted,consumed\n");
-    for(i=0;i<=XF_DMA_SNAPSHOTS;++i){const xf_audio_dma_snapshot *s=i==XF_DMA_SNAPSHOTS?&device.startup_sample:&device.snapshots[i];
+    for(i=0;i<=XF_DMA_SNAPSHOTS+1;++i){const xf_audio_dma_snapshot *s=i==XF_DMA_SNAPSHOTS+1?&device.after_fault:i==XF_DMA_SNAPSHOTS?&device.startup_sample:&device.snapshots[i];
         fprintf(f,"%s,%u,%llu,%08x,%08x,%08x,%u,%u,%u,%u,%d,%d,%llu,%llu\n",names[i],s->valid,(unsigned long long)s->at_us,s->base,s->control,s->status,s->status&31,s->status>>8&31,s->status>>16,s->queued,s->sdk_queued,s->sdk_free,(unsigned long long)s->submitted,(unsigned long long)s->consumed);}
+    fprintf(f,"# post_fault_reads=%u expected_last_valid=%u fault_software_queue=%u\n",device.post_fault_reads,(unsigned)((device.submitted*4/XF_AUDIO_BLOCK_BYTES-1)&31),device.queued);
     {int ok=!ferror(f);if(fclose(f))ok=0;return ok;}
 }

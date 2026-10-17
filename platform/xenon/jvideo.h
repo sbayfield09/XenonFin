@@ -48,6 +48,11 @@ typedef struct {
     uint64_t service_at,max_service_gap_us;
     xf_time_stats refill_times,dma_times,clock_times;
     uint32_t drain_at,progress_at;uint64_t progress_value;
+    /* First shutdown cause survives secondary drain/report failures. */
+    char drain_caller[32],drain_message[180],drain_origin[24],drain_error[112];
+    unsigned drain_line,drain_from,drain_av_from,drain_failed,drain_timed_out;
+    int drain_first_queue,drain_last_queue;
+    uint64_t drain_submitted,drain_played;
     unsigned control_kind,control_pending,session_expired,failed,decoder_end;
     unsigned sent_start,sent_stop,cleaned,attached,stream_status,report_status,kbps;
     unsigned start_status,progress_status,stop_status,cleanup_status,progress_reports,report_errors;

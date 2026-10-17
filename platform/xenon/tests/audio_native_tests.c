@@ -51,7 +51,20 @@ int main(int argc,char **argv){xf_audio_backend b,c,m;unsigned char bytes[2048];
   override_status=!strcmp(mode,"counter")?0x08018000:0x08000100; /* remaining>2048 OR last-valid not submitted */
   CHECK(b.queued(b.context)<0);s=xf_audio_native_status();CHECK(s->failed&&s->snapshots[XF_DMA_FAULT].status==(unsigned)override_status);return 0;
  }
- if(!strcmp(mode,"stall")){xf_audio_native_service(1);xf_audio_native_service(2000001);CHECK(xf_audio_native_status()->failed&&inits==1);return 0;}
+ if(!strcmp(mode,"stall")){
+  unsigned fault_status;
+  xf_audio_native_service(1);xf_audio_native_service(2000001);s=xf_audio_native_status();
+  CHECK(s->failed&&inits==1);fault_status=s->snapshots[XF_DMA_FAULT].status;
+  /* Observe a real drain after a latched fault without accepting it as a
+   * licence to reset hardware, release ownership or write more PCM. */
+  queued_bytes=0;xf_audio_native_service(2100001);s=xf_audio_native_status();
+  CHECK(s->after_fault.valid && !s->after_fault.queued && s->after_fault.sdk_queued==0 && s->post_fault_reads==1);
+  CHECK(s->snapshots[XF_DMA_FAULT].status==fault_status && s->current.status==fault_status && s->raw_status==fault_status);
+  CHECK(s->failed && s->owner==XF_AUDIO_TONE && b.queued(b.context)==-1 && !xf_audio_release(&b));
+  CHECK(!xf_audio_acquire(&m) && !b.submit(b.context,bytes,sizeof(bytes)) && calls==1 && inits==1);
+  xf_audio_native_service(2100002);CHECK(s->post_fault_reads==1);
+  xf_audio_native_service(2200001);CHECK(s->post_fault_reads==2);return 0;
+ }
  queued_bytes=2047;CHECK(b.queued(b.context)==2047&&xf_audio_native_status()->consumed==0);
  queued_bytes=0;CHECK(b.queued(b.context)==0&&xf_audio_native_status()->consumed==512);
  queued_bytes=4;CHECK(b.queued(b.context)==4&&xf_audio_native_status()->consumed==512&&!xf_audio_native_status()->failed&&xf_audio_native_status()->counter_faults==1);queued_bytes=0;

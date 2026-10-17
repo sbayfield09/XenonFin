@@ -1,7 +1,7 @@
 #include "video_audio.h"
 #include <string.h>
 #include <stdio.h>
-static void fail(xf_av_audio *a,const char *text){a->failed=1;snprintf(a->error,sizeof(a->error),"%s",text);}
+static void fail(xf_av_audio *a,const char *text){if(!a->failed)snprintf(a->error,sizeof(a->error),"%s",text);a->failed=1;}
 static void frame(void *context,uint64_t offset,uint64_t output_frame) {
     xf_av_audio *a=context;int marked=0;int64_t pts=0,expected;
     /* A PES PTS names the first frame STARTING in that PES, including when
@@ -78,6 +78,7 @@ int xf_av_audio_clock(void *context,uint64_t *us) {
     xf_av_audio *a=context;uint64_t played;int pending;int64_t relative;
     if(!a->enabled || !a->backend.queued){*us=0;return 0;}
     pending=a->backend.queued(a->backend.context);
+    a->queue_reading=pending;a->queue_valid=pending>=0 && pending<=65536;
     if(pending<0 || pending>65536){fail(a,"Invalid audio DMA queue reading.");*us=a->played*1000000/48000;return 0;}
     a->queued=(unsigned)pending;
     played=a->submitted> a->queued/4?a->submitted-(a->queued+3)/4:0;

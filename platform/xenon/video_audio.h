@@ -17,6 +17,7 @@ typedef struct {
     uint64_t read_frames,late_frames,bridge_frames;
     unsigned stamp_head,stamp_count,enabled,aligned,started,rebuffering,failed;
     unsigned have_video_pts,have_audio_pts,underruns,queued,peak_pcm,peak_input,decoder_errors;
+    int queue_reading,queue_valid; /* queued retains last valid value on failure */
     int64_t video_pts,audio_pts,origin_pts,clock_offset_us,initial_offset_us,timestamp_error_us;
     uint64_t submitted,played,pcm_frames,silence_frames,trim_frames,trimmed_frames,tail_frames,tail_limit_frames;
     /* Legacy trim/late counters above remain zero for trace compatibility. */

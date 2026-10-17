@@ -31,8 +31,8 @@ static void inject(xf_http_client *c,int status,const char *type,const void *bod
     p->len=p->tot_len=(u16_t)(a+size);p->payload=malloc(a+size);memcpy(p->payload,h,a);if(size)memcpy((char *)p->payload+a,body,size);
     CHECK(c->pcb->recv(c->pcb->callback_arg,c->pcb,p,ERR_OK)==ERR_OK);
 }
-static unsigned audio_pending,audio_can_submit;
-static int queued_audio(void *p){(void)p;return (int)audio_pending;}
+static unsigned audio_pending,audio_can_submit;static int audio_invalid;
+static int queued_audio(void *p){(void)p;return audio_invalid?-1:(int)audio_pending;}
 static int free_audio(void *p){(void)p;return 65536-(int)audio_pending;}
 static int submit_audio(void *p,const unsigned char *bytes,size_t n){(void)p;(void)bytes;CHECK(audio_can_submit && n==2048);audio_pending+=(unsigned)n;return 1;}
 static void ready_audio(void){
@@ -84,6 +84,30 @@ int main(void){
     xf_jvideo_stop(&movie,3);xf_jvideo_tick(&movie,4,1);CHECK(movie.state==XF_JV_STOPPING && !movie.sent_stop);
     audio_pending=0;clean();
     start();ready_audio();audio_pending=65537;xf_jvideo_tick(&movie,2,1);CHECK(movie.failed && strstr(movie.message,"DMA"));audio_pending=0;clean();
+    /* A failed queue read used to leave a stale nonzero queue and overwrite
+     * the primary playback failure with a claim of physical DMA timeout. */
+    start();ready_audio();movie.audio.submitted=8000;audio_pending=4096;
+    movie.audio.failed=1;strcpy(movie.audio.error,"Original PCM failure");
+    xf_jvideo_service(&movie,10);CHECK(movie.state==XF_JV_STOPPING);
+    CHECK(movie.drain_failed && movie.drain_from==XF_JV_STREAMING && movie.drain_first_queue==4096);
+    CHECK(!strcmp(movie.drain_caller,"xf_jvideo_service") && movie.drain_line);
+    audio_invalid=1;xf_jvideo_tick(&movie,2010,1);
+    CHECK(movie.drain_timed_out && !movie.audio.queue_valid && movie.drain_last_queue==-1);
+    CHECK(strstr(movie.drain_error,"unverified") && !strcmp(movie.message,"Original PCM failure"));
+    CHECK(!strcmp(movie.audio.error,"Original PCM failure") && !strcmp(movie.error_origin,"audio/DMA/PTS"));
+    CHECK(movie.audio.submitted==movie.drain_submitted && movie.lease);
+    audio_invalid=0;audio_pending=0;clean();
+    /* Invalid must also remain unknown when the last VALID count was zero. */
+    start();ready_audio();audio_invalid=1;xf_jvideo_tick(&movie,2,1);
+    CHECK(movie.state==XF_JV_STOPPING && !movie.audio.queued && !movie.audio.queue_valid);
+    xf_jvideo_tick(&movie,2002,1);CHECK(movie.drain_timed_out && strstr(movie.drain_error,"unverified"));
+    audio_invalid=0;clean();
+    /* A real nonempty reading is distinguished, not bypassed or extended. */
+    start();ready_audio();movie.audio.submitted=1024;audio_pending=2048;
+    xf_jvideo_stop(&movie,10);xf_jvideo_tick(&movie,2009,1);CHECK(!movie.drain_timed_out);
+    xf_jvideo_tick(&movie,2010,1);CHECK(movie.drain_timed_out && strstr(movie.drain_error,"nonempty"));
+    CHECK(movie.audio.submitted==1024 && movie.lease && !movie.drain_failed);
+    audio_pending=0;clean();
     /* Recovery with a prepared picture and no queued successors used to
      * wait forever for a FULL video queue. It now needs one usable picture. */
     start();ready_audio();audio_can_submit=1;movie.stream.response.headers_done=1;

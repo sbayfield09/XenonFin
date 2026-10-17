@@ -1,5 +1,10 @@
 # Validation — 14 October 2026
 
+## Native 0.7.6 movie drain investigation — 17 October 2026
+
+The user confirms 0.7.5 tone/music work but movie playback fails and locks audio out. 0.7.6 preserves the primary failure, records the shutdown caller and distinguishes invalid queue reads from nonempty DMA. Read-only post-fault snapshots can establish physical drain despite the retained software latch. [Investigation and hardware sequence](NATIVE_AUDIO_076.md), [software results](native-audio-076-validation.json). **The movie trigger and lockout remain unresolved; no hardware success is claimed.** Earlier release statements below are historical.
+
+
 ## Native 0.7.5 DMA startup and ownership
 
 The integrated 0.7.4 app failed before any media decode; standalone sound is confirmed working. 0.7.5 adds validated startup, explicit tone/music/movie leases and retained register snapshots using the original SDK driver. [Diagnosis, software evidence and cold-boot test](NATIVE_AUDIO_075.md). **The reported `00008000` status itself is empty; the earlier failing sample was not retained, so the console trigger still needs confirmation. Physical 0.7.5 tone/media output is unverified.** Older results below are historical.
