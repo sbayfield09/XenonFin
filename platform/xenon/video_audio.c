@@ -91,13 +91,13 @@ void xf_av_audio_output(xf_av_audio *a,int allow,int video_ready,int tail) {
     unsigned budget;uint64_t us;
     if(!a->enabled || a->failed)return;
     xf_av_audio_clock(a,&us);
-    if(!allow || (!a->aligned && !(a->bridge && a->have_video_pts)) || a->failed)return;
-    if(a->decoder.pcm_size>=XF_AV_RECOVER_PCM || (a->decoder.finished && a->decoder.pcm_size))a->bridge=0;
-    if(a->started && !a->queued && !a->decoder.finished && !a->bridge && !a->rebuffering && a->decoder.pcm_size<XF_AV_RECOVER_PCM) {
+    if(!allow || !a->aligned || a->failed)return;
+    a->bridge=0; /* legacy trace field: pressure no longer authorises silence */
+    if(a->started && !a->queued && !a->decoder.finished && !a->rebuffering && a->decoder.pcm_size<XF_AV_RECOVER_PCM) {
         ++a->underruns;a->rebuffering=1;
     }
     if(!a->started || a->rebuffering) {
-        if(!video_ready || (!a->bridge && !a->silence_frames && a->decoder.pcm_size<(a->started?XF_AV_RECOVER_PCM:XF_AV_START_PCM) && !a->decoder.finished))return;
+        if(!video_ready || (!a->silence_frames && a->decoder.pcm_size<(a->started?XF_AV_RECOVER_PCM:XF_AV_START_PCM) && !a->decoder.finished))return;
         a->rebuffering=0;
     }
     for(budget=0;budget<4 && a->queued+sizeof(a->block)<=XF_AV_DMA_BYTES;++budget) {
@@ -111,6 +111,7 @@ void xf_av_audio_output(xf_av_audio *a,int allow,int video_ready,int tail) {
                 if(distance<available/4)available=(size_t)distance*4;
             }
             if(desired<(int64_t)next) {
+                a->overlap_seen=1;a->overlap_desired=desired;a->overlap_next=next;a->overlap_read=a->read_frames;
                 fail(a,"Audio PTS overlaps already submitted PCM; no samples discarded. Reopen stream.");return;
             }
             if(desired>(int64_t)next) {
@@ -126,10 +127,10 @@ void xf_av_audio_output(xf_av_audio *a,int allow,int video_ready,int tail) {
             /* A discontinuity may lie inside this block: continue filling
              * without padding over timestamped real PCM or leading silence. */
             if(a->decoder.pcm_size && a->block_used<sizeof(a->block))continue;
-            if(!a->decoder.finished && !a->bridge)return;
+            if(!a->decoder.finished)return;
             if(!a->block_used && (!tail || (a->tail_limit_frames && a->submitted>=a->tail_limit_frames)))return;
             left=sizeof(a->block)-a->block_used;memset(a->block+a->block_used,0,left);
-            if(a->bridge)a->bridge_frames+=left/4;else a->tail_frames+=left/4;a->block_used=sizeof(a->block);
+            a->tail_frames+=left/4;a->block_used=sizeof(a->block);
         }
         if(a->backend.available(a->backend.context)<(int)(sizeof(a->block)+2048))return;
         if(!a->backend.submit(a->backend.context,a->block,sizeof(a->block))){fail(a,"PCM output rejected submission.");return;}a->submitted+=sizeof(a->block)/4;

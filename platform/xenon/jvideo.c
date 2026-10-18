@@ -3,6 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 static void transition(xf_jvideo *,unsigned,uint32_t);
+/* 10 s maximum supported audio PTS gap at the requested 2.5 Mbit/s video
+ * needs 3.125 MB plus mux/encoder burst headroom. Fixed storage, no growth.
+ * Only compressed video waits here; the decoded frame queue stays unchanged. */
+#define XF_JV_LOOKAHEAD (4U*1024U*1024U)
+static unsigned char video_lookahead[XF_JV_LOOKAHEAD];
 enum { JV_NEGOTIATE=1,JV_START,JV_PROGRESS,JV_STOP,JV_CLEANUP };
 void xf_jvideo_init(xf_jvideo *m,xf_video *v) {memset(m,0,sizeof(*m));m->player=v;xf_http_init(&m->stream);xf_http_init(&m->control);xf_av_audio_init(&m->audio,NULL);}
 void xf_jvideo_audio(xf_jvideo *m,const xf_audio_backend *audio) {xf_av_audio_init(&m->audio,audio);}
@@ -160,19 +165,19 @@ void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
     if(!m->pause_requested || a->queued)for(i=0;i<4 && !a->failed;++i) {
         unsigned frames=a->decoder.mp3_frames;
         if(a->decoder.pcm_size>=XF_AV_PCM_TARGET)break;
-        before=m->backend.microseconds(m->backend.context);xf_av_audio_decode(a,m->decoder_end);
+        before=m->backend.microseconds(m->backend.context);xf_av_audio_decode(a,m->decoder_end || m->ps.input_complete);
         if(a->decoder.mp3_frames==frames)break;
         xf_time_add(&m->audio_times,m->backend.microseconds(m->backend.context)-before);
         if(!m->pause_requested)output(m,ready,now);
         if(m->backend.microseconds(m->backend.context)-started>=6000)break;
     }
-    /* Retain the existing explicit, counted EOF/gap bridge only for actual
-     * full-video-ES multiplex head-of-line blockage. Never free-run a clock. */
-    if(!m->pause_requested && a->decoder.pcm_size<16384 && a->decoder.input_size<2048 &&
-       !a->decoder.finished && a->have_video_pts && m->ps.payload<m->ps.payload_end &&
-       !m->ps.payload_kind && !m->ps.discard_video && !xf_mpeg1_stream_space()) {
-        if(!a->bridge)++a->gap_events;
-        a->bridge=1;
+    /* Buffer pressure is not evidence of a timestamp gap. Never submit
+     * invented silence to make video advance and unlock the demuxer. */
+    if(!m->pause_requested && !a->queued && !a->decoder.pcm_size && a->decoder.input_size<2048 &&
+       !a->decoder.finished && m->ps.ahead_capacity && m->ps.ahead_count==m->ps.ahead_capacity &&
+       m->ps.payload<m->ps.payload_end && !m->ps.payload_kind && !xf_mpeg1_stream_space()) {
+        snprintf(m->error_origin,sizeof(m->error_origin),"MPEG-PS lookahead");
+        finish(m,1,"Audio interleave exceeds bounded video lookahead; no synthetic clock advance.",now);return;
     }
     if(!m->pause_requested)output(m,ready,now);
     xf_av_audio_clock(a,&position);
@@ -191,7 +196,7 @@ void xf_jvideo_service(xf_jvideo *m,uint32_t now) {
 }
 int xf_jvideo_export(const xf_jvideo *m,const char *path) {
     FILE *f=fopen(path,"w");unsigned k,i,n;if(!f)return 0;
-    fprintf(f,"# XenonFin 0.7.6 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
+    fprintf(f,"# XenonFin 0.7.7 mode=%u state=%s origin=%s reason=%s\n",m->mode,xf_jvideo_state_name(m->av_state),m->error_origin,m->wait_reason);
     fprintf(f,"# HTTP status=%u code=%d done=%d complete=%d failed=%d active=%d rx=%llu PS=%llu backpressure=%d\n",
         m->stream_status,m->terminal_http_code,m->terminal_http_done,m->terminal_http_complete,m->terminal_http_failed,m->stream.active,
         (unsigned long long)m->stream.received_size,(unsigned long long)m->ps.received,m->stream.backpressure);
@@ -200,6 +205,11 @@ int xf_jvideo_export(const xf_jvideo *m,const char *path) {
         (unsigned)m->last_pcm,(unsigned)m->last_dma,(unsigned long long)m->terminal_submitted,(unsigned long long)m->terminal_played,
         (long long)m->terminal_video_pts-(long long)m->terminal_audio_us,(unsigned long long)m->max_service_gap_us);
     fprintf(f,"# after_cleanup_consumed=%llu submitted=%llu\n",(unsigned long long)m->audio.played,(unsigned long long)m->audio.submitted);
+    fprintf(f,"# lookahead_bytes=%u peak=%u capacity=%u input_complete=%u bridge_frames=%llu tail_frames=%llu gap_events=%u\n",
+        (unsigned)m->ps.ahead_count,(unsigned)m->ps.ahead_peak,(unsigned)m->ps.ahead_capacity,m->ps.input_complete,
+        (unsigned long long)m->audio.bridge_frames,(unsigned long long)m->audio.tail_frames,m->audio.gap_events);
+    fprintf(f,"# overlap=%u desired=%lld next=%llu read=%llu markerr_us=%lld\n",m->audio.overlap_seen,
+        (long long)m->audio.overlap_desired,(unsigned long long)m->audio.overlap_next,(unsigned long long)m->audio.overlap_read,(long long)m->audio.timestamp_error_us);
     fprintf(f,"# drain caller=%s:%u from=%u av_from=%s at_ms=%u failed=%u origin=%s first=%s\n",
         m->drain_caller,m->drain_line,m->drain_from,xf_jvideo_state_name(m->drain_av_from),m->drain_at,m->drain_failed,m->drain_origin,m->drain_message);
     fprintf(f,"# drain queue_first=%d queue_last=%d cached=%u valid=%d submitted_at_entry=%llu played_at_entry=%llu timeout=%u secondary=%s\n",
@@ -287,6 +297,7 @@ static void handle(xf_jvideo *m,uint32_t now) {
                 }
                 m->audio.enabled=1;
                 xf_video_ps_audio(&m->ps,xf_av_audio_byte,xf_av_audio_space,&m->audio);
+                if(m->mode!=XF_AV_AUDIO_ONLY)xf_video_ps_lookahead(&m->ps,video_lookahead,sizeof(video_lookahead));
                 m->ps.optional_initial_pts=0;
                 xf_video_master(m->player,xf_av_audio_clock,&m->audio);
                 m->ps.discard_video=m->mode==XF_AV_AUDIO_ONLY;
@@ -320,7 +331,7 @@ void xf_jvideo_tick(xf_jvideo *m,uint32_t now,int ready) {
             before=m->backend.microseconds(m->backend.context);
             if(xf_video_ps_tick(&m->ps,xf_mpeg1_stream_byte,xf_mpeg1_stream_space,eof)<0) {
                 snprintf(m->error_origin,sizeof(m->error_origin),"MPEG-PS demux");finish(m,1,m->audio.failed?m->audio.error:xf_mpeg1_stream_error()[0]?xf_mpeg1_stream_error():m->ps.error,now);
-            } else if(eof && !m->ps.count && m->ps.payload==m->ps.payload_end) {
+            } else if(eof && !m->ps.count && m->ps.payload==m->ps.payload_end && !m->ps.ahead_count) {
                 if(m->mode!=XF_AV_AUDIO_ONLY && !xf_mpeg1_stream_end())finish(m,1,xf_mpeg1_stream_error(),now);
                 m->decoder_end=1;
             }

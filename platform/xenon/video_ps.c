@@ -5,6 +5,9 @@
 #include <string.h>
 #include <stdio.h>
 void xf_video_ps_init(xf_video_ps *s) { memset(s,0,sizeof(*s)); }
+void xf_video_ps_lookahead(xf_video_ps *s,unsigned char *bytes,size_t size) {
+    s->ahead=bytes;s->ahead_capacity=bytes?size:0;s->ahead_head=s->ahead_count=s->ahead_peak=0;
+}
 size_t xf_video_ps_space(void *context) { xf_video_ps *s=context;return s->failed?0:XF_PS_RING-s->count; }
 int xf_video_ps_byte(void *context,unsigned char c) {
     xf_video_ps *s=context;
@@ -67,19 +70,33 @@ static int pes(xf_video_ps *s,unsigned type,size_t length) {
 int xf_video_ps_tick(xf_video_ps *s,int (*sink)(unsigned char),size_t (*space)(void),int eof) {
     unsigned budget=32768,progress=0;s->eof=!!eof;
     if(s->failed)return -1;
+    while(s->ahead_count && budget && space()) {
+        if(!sink(s->ahead[s->ahead_head]))return fail(s,"Buffered MPEG video input rejected.");
+        if(++s->ahead_head==s->ahead_capacity)s->ahead_head=0;
+        --s->ahead_count;--budget;progress=1;
+    }
     while(budget) {
         size_t n,i;unsigned type;
         if(s->payload<s->payload_end) {
-            size_t capacity;
+            size_t capacity;int deferred;
             if(s->stamp_pending) {
                 int rc=s->stamp?s->stamp(s->stamp_context,s->payload_kind,s->payload_kind?s->audio_bytes:s->video_bytes,s->timestamp):1;
                 if(rc<0)return fail(s,"MPEG timestamp receiver rejected packet.");
                 if(!rc)return (int)progress;
                 s->stamp_pending=0;
             }
-            capacity=s->payload_kind?s->audio_space(s->audio_context):s->discard_video?65542:space();if(!capacity)return (int)progress;
+            deferred=!s->payload_kind && !s->discard_video && s->ahead_capacity && (s->ahead_count || !space());
+            capacity=s->payload_kind?s->audio_space(s->audio_context):s->discard_video?65542:deferred?s->ahead_capacity-s->ahead_count:space();if(!capacity)return (int)progress;
             n=s->payload_end-s->payload;if(n>capacity)n=capacity;if(n>budget)n=budget;
-            for(i=0;i<n;++i) {
+            if(deferred) {
+                size_t start=s->ahead_head+s->ahead_count,first;
+                if(start>=s->ahead_capacity)start-=s->ahead_capacity;
+                first=s->ahead_capacity-start;if(first>n)first=n;
+                memcpy(s->ahead+start,s->packet+s->payload,first);
+                memcpy(s->ahead,s->packet+s->payload+first,n-first);
+                s->ahead_count+=n;s->payload+=n;
+                if(s->ahead_count>s->ahead_peak)s->ahead_peak=s->ahead_count;
+            } else for(i=0;i<n;++i) {
                 unsigned char c=s->packet[s->payload];
                 int rc=s->payload_kind?s->audio_byte(s->audio_context,c):s->discard_video?1:sink(c);
                 if(!rc)return fail(s,"Elementary MPEG input rejected.");
@@ -114,7 +131,7 @@ int xf_video_ps_tick(xf_video_ps *s,int (*sink)(unsigned char),size_t (*space)(v
             if(pes(s,type,n-6)<0)return -1;
         } else {consume(s,n);progress=1;--budget;}
     }
-    if(eof && !s->count && s->payload==s->payload_end) {s->ended=1;return (int)progress;}
+    if(eof && !s->count && s->payload==s->payload_end) {s->input_complete=1;if(!s->ahead_count)s->ended=1;return (int)progress;}
     if(eof && budget && s->count && s->payload==s->payload_end) return fail(s,"HTTP ended inside a MPEG-PS packet.");
     return (int)progress;
 }

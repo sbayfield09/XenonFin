@@ -105,16 +105,24 @@ def main():
                         {'LibraryOptions': {'PathInfos': [{'Path': str(work/folder)}], 'EnableRealtimeMonitor': False,
                                             'TypeOptions': [{'Type': t, 'MetadataFetchers': [], 'ImageFetchers': []} for t in ('Movie', 'Series', 'Season', 'Episode')]}})
                 indexed = []
+                expected_movies = {'Native Stream', 'Native Sync'}
+                if args.long:
+                    expected_movies.add('Long Stream')
+                if args.extended:
+                    expected_movies.update(('Video Only', 'Delayed Audio', 'Short Audio', 'Gapped Audio'))
                 for _ in range(240):
                     indexed = api('/Items?Recursive=true&IncludeItemTypes=Movie,Episode')['Items']
-                    if len(indexed) >= (3+int(args.long)+4*int(args.extended)):
+                    if expected_movies <= {i['Name'] for i in indexed if i['Type'] == 'Movie'} and any(i['Type'] == 'Episode' for i in indexed):
                         break
                     time.sleep(.25)
+                else:
+                    raise RuntimeError('Fixture indexing incomplete: '+repr([(i['Type'], i['Name']) for i in indexed]))
                 movie = next(i for i in indexed if i['Type'] == 'Movie' and i['Name'] == 'Native Stream')
                 episode = next(i for i in indexed if i['Type'] == 'Episode')
                 sync_movie = next(i for i in indexed if i['Name'] == 'Native Sync')
                 cases = [(movie, '', 'movie/realtime/pause/resume/end'), (episode, '', 'episode/realtime'), (movie, '--stop', 'cancel/report/encoding cleanup'), (sync_movie, '--sync', 'known flash/beep A-V timing')]
                 if args.extended:
+                    cases.append((movie, '--lookahead', 'blocked video ES with continuous audio lookahead'))
                     for name, label in [('Video Only', 'silent source fallback'), ('Delayed Audio', 'positive audio PTS offset'), ('Short Audio', 'hardware-clocked silent video tail'), ('Gapped Audio', 'timestamp-gapped source PCM placement')]:
                         cases.append((next(i for i in indexed if i['Name'] == name), '--audio-gap' if name == 'Gapped Audio' else '--audio-tail' if name == 'Short Audio' else '', label))
                     cases.extend([(movie, '--mode-a', 'mode A same audio-bearing stream/video only'), (movie, '--mode-b', 'mode B same stream/audio only'), (movie, '--console-cost', 'console-cost cooperative decode and GPU'), (movie, '--short-stall', '60ms CPU stall covered by bounded DMA'), (movie, '--recovery', '250ms CPU stall and DMA recovery'), (movie, '--pause-long', '20-second pause/backpressure'), (movie, '--stall', '5-second network interruption/rebuffer'), (movie, '--slow-audio', '46 kHz simulated device vs 48 kHz media clock')])

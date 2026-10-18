@@ -35,12 +35,22 @@ int main(void){
     CHECK(audio.initial_offset_us==100000 && !audio.silence_frames && submitted>=24576 && submitted<=32768);
     for(i=0;i<19200;++i)CHECK(!capture[i]);
     for(;i<submitted;++i)CHECK(capture[i]==0x31);
-    /* Demux-blocked silence advances ONLY through DMA. New timestamped PCM
-     * begins at its correct media sample, including a gap inside a block. */
+    /* Buffer pressure used to pad this unfinished 1152-sample MP3 frame to
+     * a DMA boundary, then reject the next frame as overlapping that silence. */
+    reset(0);xf_av_audio_output(&audio,1,1,0);
+    audio.bridge=1;audio.decoder.pcm_size=1152*4;
+    xf_av_audio_output(&audio,1,1,0);
+    CHECK(!audio.failed && !audio.bridge_frames && !audio.tail_frames && audio.block_used==128*4);
+    CHECK(audio.read_frames==3200 && audio.submitted==3072);
+    audio.decoder.pcm_size=1152*4;xf_av_audio_output(&audio,1,1,0);
+    CHECK(!audio.failed && audio.read_frames==4352 && audio.block_used==256*4);
+    for(i=0;i<submitted;++i)CHECK(capture[i]==0x31);
+    /* Complete starvation also cannot manufacture a media-clock advance. */
     reset(0);audio.decoder.pcm_size=0;audio.bridge=1;
-    xf_av_audio_output(&audio,1,1,1);CHECK(pending==8192 && audio.bridge_frames==2048);
-    pending=0;CHECK(xf_av_audio_clock(&audio,&position) && position==42666);
-    audio.maps[0].base_pts=45000+5625;audio.decoder.pcm_size=XF_AV_RECOVER_PCM;
+    xf_av_audio_output(&audio,1,1,1);CHECK(!submitted && !audio.bridge_frames);
+    audio.decoder.pcm_size=XF_AV_START_PCM;xf_av_audio_output(&audio,1,1,0);CHECK(!audio.failed && submitted);
+    /* A future timestamp does prove a gap, even inside a DMA block. */
+    reset(0);audio.maps[0].base_pts=45000+5625;
     for(i=0;i<3;++i){xf_av_audio_output(&audio,1,1,0);pending=0;}
     CHECK(!audio.bridge && submitted>12000);
     for(i=0;i<12000;++i)CHECK(!capture[i]);
@@ -86,5 +96,6 @@ int main(void){
     /* A timestamp overlap is rejected, never repaired by dropping real PCM. */
     reset(0);audio.maps[0].base_pts=audio.origin_pts-90;xf_av_audio_output(&audio,1,1,0);
     CHECK(audio.failed && !audio.late_frames && !audio.trimmed_frames && !submitted && strstr(audio.error,"no samples discarded"));
+    CHECK(audio.overlap_seen && audio.overlap_desired==-48 && !audio.overlap_next);
     puts("Native movie audio DMA consumption clock, timestamp-origin alignment without PCM trimming, pause/rebuffer, PTS and codec rejection PASS");return 0;
 }

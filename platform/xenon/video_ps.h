@@ -18,9 +18,15 @@ typedef struct {
     int (*stamp)(void *,unsigned kind,uint64_t offset,int64_t pts90k);
     void *audio_context;
     void *stamp_context;
+    /* Optional bounded video backlog: demux audio beyond a blocked video ES.
+     * Owned by the caller; bytes leave in elementary-stream order. */
+    unsigned char *ahead;
+    size_t ahead_capacity,ahead_head,ahead_count,ahead_peak;
+    unsigned input_complete;
     char error[128];
 } xf_video_ps;
 void xf_video_ps_init(xf_video_ps *);
+void xf_video_ps_lookahead(xf_video_ps *,unsigned char *,size_t);
 /* Optional audio receiver. kind 0=E0 video, 1=C0 audio. PTS is unwrapped on
  * one shared 33-bit timeline; offset is that elementary stream's byte offset. */
 void xf_video_ps_audio(xf_video_ps *,int (*)(void *,unsigned char),size_t (*)(void *),void *);

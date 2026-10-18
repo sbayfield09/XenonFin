@@ -61,6 +61,29 @@ static void timestamps(void){
     put((const unsigned char *)"\0\0\1\xe0\0\2\x0f\xaa",8);
     CHECK(xf_video_ps_tick(&ps,sink,space,0)<0 && strstr(ps.error,"initial"));
 }
+static void lookahead(void) {
+    unsigned char storage[8];
+    ps_reset();audio_used=0;capacity=0;
+    xf_video_ps_audio(&ps,audio_sink,audio_space,NULL);xf_video_ps_lookahead(&ps,storage,sizeof(storage));
+    ps.ahead_head=7;put(pack,sizeof(pack));
+    packet(0,45000,11);packet(1,45000,22);packet(0,48000,33);
+    CHECK(!used && audio_used==1 && audio_output[0]==22 && ps.ahead_count==2 && ps.ahead_peak==2);
+    CHECK(xf_video_ps_tick(&ps,sink,space,1)>=0 && ps.input_complete && !ps.ended);
+    capacity=1;CHECK(xf_video_ps_tick(&ps,sink,space,1)>=0 && used==1 && output[0]==11 && ps.ahead_count==1 && !ps.ended);
+    capacity=sizeof(output);CHECK(xf_video_ps_tick(&ps,sink,space,1)>=0 && used==2 && output[1]==33 && !ps.ahead_count && ps.ended);
+    /* One payload memcpy straddles the ring end, not just separate packets. */
+    ps_reset();capacity=0;xf_video_ps_lookahead(&ps,storage,sizeof(storage));ps.ahead_head=6;
+    put(pack,sizeof(pack));put((const unsigned char *)"\0\0\1\xe0\0\5\x0f\x0b\x16\x21\x2c",11);
+    CHECK(xf_video_ps_tick(&ps,sink,space,1)>=0 && ps.ahead_count==4 && ps.input_complete);
+    capacity=sizeof(output);CHECK(xf_video_ps_tick(&ps,sink,space,1)>=0 && ps.ended && used==4 && !memcmp(output,"\x0b\x16\x21\x2c",4));
+    /* Full backlog applies backpressure, then resumes without loss/reordering. */
+    ps_reset();audio_used=0;capacity=0;
+    xf_video_ps_audio(&ps,audio_sink,audio_space,NULL);xf_video_ps_lookahead(&ps,storage,2);put(pack,sizeof(pack));
+    packet(0,45000,11);packet(0,48000,33);packet(0,51000,44);packet(1,45000,22);
+    CHECK(ps.ahead_count==2 && ps.ahead_peak==2 && !audio_used && !used && !ps.failed);
+    capacity=sizeof(output);CHECK(xf_video_ps_tick(&ps,sink,space,1)>=0 && ps.ended && ps.input_complete);
+    CHECK(used==3 && output[0]==11 && output[1]==33 && output[2]==44 && audio_used==1 && audio_output[0]==22);
+}
 static const char valid[]="{\"PlaySessionId\":\"session\",\"MediaSources\":[{\"Id\":\"source\",\"Protocol\":\"File\",\"Container\":\"mov,mp4\",\"SupportsTranscoding\":true,\"TranscodingSubProtocol\":\"http\",\"TranscodingContainer\":\"mpeg\",\"RunTimeTicks\":3000000000,\"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"h264\",\"Width\":1920,\"Height\":1080,\"Index\":0,\"VideoRangeType\":\"SDR\"},{\"Type\":\"Audio\",\"Codec\":\"aac\"}]}]}";
 static int parse(const char *json,xf_video_source *s){char error[180];xf_response_init(&response);response.status=200;response.complete=1;snprintf(response.body,sizeof(response.body),"%s",json);response.body_size=strlen(json);return xf_video_source_parse(&response,"movie","device",s,error,sizeof(error));}
 static void negotiation(void){
@@ -89,4 +112,4 @@ static void http64(void){
     h="HTTP/1.1 200 OK\r\nContent-Length: 18446744073709551616\r\n\r\n";
     xf_response_stream(&response,discard,NULL,UINT64_MAX);xf_response_feed(&response,h,strlen(h));CHECK(response.failed);
 }
-int main(void){framing();timestamps();negotiation();http64();printf("Native MPEG-PS boundaries/backpressure/format rejection, negotiation and 64-bit HTTP: %u assertions passed\n",checks);return 0;}
+int main(void){framing();timestamps();lookahead();negotiation();http64();printf("Native MPEG-PS boundaries/backpressure/lookahead/format rejection, negotiation and 64-bit HTTP: %u assertions passed\n",checks);return 0;}

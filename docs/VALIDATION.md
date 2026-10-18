@@ -1,5 +1,10 @@
 # Validation — 14 October 2026
 
+## Native 0.7.7 movie PCM continuity
+
+User hardware exposes an audio-PTS overlap on every tested video with audio. The client-side bridge path can pad unfinished PCM under video-buffer pressure and then reject the next real samples. 0.7.7 removes this speculative padding and adds bounded demux video lookahead, separate input/decoder EOF and numerical overlap diagnostics. [Diagnosis and hardware sequence](NATIVE_AV_077.md); [software evidence](native-av-077-validation.json). **Console playback and any separate DMA lockout remain pending hardware verification.**
+
+
 ## Native 0.7.6 movie drain investigation — 17 October 2026
 
 The user confirms 0.7.5 tone/music work but movie playback fails and locks audio out. 0.7.6 preserves the primary failure, records the shutdown caller and distinguishes invalid queue reads from nonempty DMA. Read-only post-fault snapshots can establish physical drain despite the retained software latch. [Investigation and hardware sequence](NATIVE_AUDIO_076.md), [software results](native-audio-076-validation.json). **The movie trigger and lockout remain unresolved; no hardware success is claimed.** Earlier release statements below are historical.
